@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "dev": "deno run --watch index.ts"
+  },
+  "imports": {
+    "@fxts/core": "npm:@fxts/core@^1.10.0",
+    "@sinclair/typebox": "npm:@sinclair/typebox@^0.34.33"
+  }
+}

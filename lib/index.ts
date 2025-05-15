@@ -1,0 +1,177 @@
+import { Type as t } from "npm:@sinclair/typebox";
+import type { TLiteral, TObject, TString } from "npm:@sinclair/typebox";
+import { Value as v } from "npm:@sinclair/typebox/value";
+import { pipeLazy } from "npm:@fxts/core";
+
+const Params = (
+	defaults: { system?: string; base_url?: string; model?: string },
+) => t.Object({
+	system: t.String({ default: defaults.system }),
+	context: t.Array(t.String()),
+	assistant: t.Array(t.String()),
+	tool: t.Array(t.String()),
+	base_url: t.String({ default: defaults.base_url }),
+	model: t.String({ default: defaults.model }),
+	to_agent: t.String(),
+	from_agent: t.Optional(t.String()),
+	response: t.Optional(t.String()),
+});
+
+export const schema = <
+	K extends string,
+	T extends {
+		[F in K]: { [A in string | 0]: string };
+	},
+>(body: T) => {
+	const validatorOpts: TObject<
+		{
+			name: TLiteral<Extract<keyof T, string>>;
+			arguments: TObject<{ [P in string]: TString }>;
+		}
+	>[] = [];
+	const oaiSpec = [];
+	for (const key in body) {
+		const value = body[key];
+		const args = t.Object(
+			Object.fromEntries(
+				Object.entries(value).filter(([name, _]) => name != "0")
+					.map((
+						[name, description],
+					) => [name, t.String({ description })]),
+			),
+			{ description: value[0] },
+		);
+		oaiSpec.push({ name: key, arguments: args });
+		validatorOpts.push(t.Object({ name: t.Literal(key), arguments: args }));
+	}
+	return [
+		oaiSpec,
+		<N extends keyof T>(
+			str: string,
+		): { name: N; arguments: T[N] } =>
+			v.Parse(t.Union(validatorOpts), JSON.parse(str)),
+	] as const;
+};
+
+export class Interface {
+	private params: ReturnType<typeof Params>["static"];
+
+	static async withDefaults(
+		defaults: { system?: string; base_url?: string; model?: string },
+	) {
+		return new Interface(v.Parse(
+			Params(defaults),
+			await new Response(Deno.stdin.readable).json(),
+		));
+	}
+
+	constructor(params: ReturnType<typeof Params>["static"]) {
+		this.params = params;
+	}
+
+	get response() {
+		return this.params.response ?? "";
+	}
+
+	keepAndReturn() {
+		console.log(JSON.stringify(this.params));
+		Deno.exit(0);
+	}
+
+	pushAndReturn(
+		{ context, assistant, tool }: {
+			context: string;
+			assistant: string;
+			tool: string;
+		},
+	) {
+		this.params.context.push(context);
+		this.params.assistant.push(assistant);
+		this.params.tool.push(tool);
+		console.log(JSON.stringify(this.params));
+		Deno.exit(0);
+	}
+
+	clearTools() {
+		this.params.tool = this.params.tool.map((_) => "");
+	}
+}
+
+export const insertContent = (filePath: string, content: string) => {
+	const i = filePath.lastIndexOf("/");
+	const dir = filePath.slice(0, i);
+	Deno.mkdirSync(dir, { recursive: true });
+	Deno.writeTextFileSync(filePath, content);
+	return dir;
+};
+
+type Parser<Curr, Next> = (input: [string, Curr]) => [string, Next];
+
+export const seq = pipeLazy;
+
+export function takeAndSkip<Curr, K extends string>(
+	key: K,
+	to: string,
+): Parser<Curr, Curr & { [P in K]?: string }> {
+	return ([input, state]) => {
+		const idx = input.indexOf(to);
+		if (idx === -1) throw [input, state];
+		return [input.slice(idx + to.length), {
+			...state,
+			[key]: input.slice(0, idx),
+		}];
+	};
+}
+
+export function takeAndSkipMany<
+	Curr,
+	K extends string,
+>(
+	key: K,
+	to: string,
+	extra: Parser<Curr, Curr>,
+): Parser<Curr, Curr & { [P in K]?: string[] }> {
+	return ([input, state]) => {
+		let rem = input;
+		const arr = [];
+		while (true) {
+			try {
+				const [inn, out] = takeAndSkip(key, to)([rem, {}]);
+				rem = inn;
+				if (out[key]) arr.push(out[key]);
+				try {
+					rem = extra([rem, state])[0];
+				} catch (_) {
+					_;
+				}
+			} catch (_) {
+				return [rem, { ...state, [key]: arr }];
+			}
+		}
+	};
+}
+
+export function takeAllOrSkip<Curr, K extends string>(
+	key: K,
+	to: string,
+): Parser<Curr, Curr & { [P in K]?: string }> {
+	return ([input, state]) => {
+		const idx = input.indexOf(to);
+		const end = idx === -1 ? input.length : idx;
+		const remainingInput = input.slice(end + (idx === -1 ? 0 : to.length));
+		return [remainingInput, { ...state, [key]: input.slice(0, end) }];
+	};
+}
+
+export function whitespace<Curr>(
+	[input, state]: [string, Curr],
+): [string, Curr] {
+	return [input.trimStart(), state];
+}
+
+export function literal<Curr>(str: string): Parser<Curr, Curr> {
+	return ([input, state]) => {
+		if (!input.startsWith(str)) throw [input, state];
+		return [input.slice(str.length), state];
+	};
+}
