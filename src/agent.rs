@@ -2,10 +2,7 @@ use crate::openai::{ChatReader, OpenAIError};
 use crate::prompt::Prompter;
 use env_logger::Target;
 use log::{info, warn};
-use std::env;
-use std::fs::create_dir_all;
 use std::io;
-use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -17,10 +14,6 @@ pub struct Agent {
 
 impl Agent {
 	pub fn new(name: String, dir: String, allowed: Vec<String>) -> io::Result<Self> {
-		let mut data_dir = get_data_dir();
-		create_dir_all(&data_dir)?;
-		data_dir.push("logs");
-
 		env_logger::builder()
 			.target(Target::Stderr)
 			.filter_level(log::LevelFilter::Info)
@@ -86,16 +79,4 @@ impl Agent {
 				Ok(acc + text.as_str())
 			})
 	}
-}
-
-pub fn get_data_dir() -> PathBuf {
-	if let Ok(mut xdg_data_dirs) = env::var("XDG_DATA_DIRS") {
-		xdg_data_dirs.truncate(xdg_data_dirs.find(':').unwrap_or(xdg_data_dirs.len()));
-		xdg_data_dirs + "/promptrs/"
-	} else if let Ok(home) = env::var("HOME") {
-		home + "/.local/share/promptrs/"
-	} else {
-		"~/.local/share/promptrs/".into()
-	}
-	.into()
 }
