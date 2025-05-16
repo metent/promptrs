@@ -84,7 +84,20 @@ export class Interface {
 			assistant: string;
 			tool: string;
 		},
+		pruneLimit = 5e5,
 	) {
+		let totalLength = context.length + assistant.length + tool.length;
+		for (let i = this.params.tool.length - 1; i >= 0; i--) {
+			totalLength += this.params.context[i].length +
+				this.params.assistant[i].length +
+				this.params.tool[i].length;
+			if (totalLength > pruneLimit) {
+				this.params.context = this.params.context.slice(i + 1);
+				this.params.assistant = this.params.assistant.slice(i + 1);
+				this.params.tool = this.params.tool.slice(i + 1);
+				break;
+			}
+		}
 		this.params.context.push(context);
 		this.params.assistant.push(assistant);
 		this.params.tool.push(tool);

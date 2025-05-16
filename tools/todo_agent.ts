@@ -6,7 +6,7 @@ import {
 	takeAllOrSkip,
 	takeAndSkip,
 	takeAndSkipMany,
-} from "./sdk.ts";
+} from "../lib/index.ts";
 
 const [oaiSpec, validator] = schema({
 	inspect: {
