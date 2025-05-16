@@ -84,7 +84,7 @@ export class Interface {
 			assistant: string;
 			tool: string;
 		},
-		pruneLimit = 5e5,
+		pruneLimit = 1e5,
 	) {
 		let totalLength = context.length + assistant.length + tool.length;
 		for (let i = this.params.tool.length - 1; i >= 0; i--) {

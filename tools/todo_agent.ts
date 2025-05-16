@@ -13,9 +13,9 @@ const [oaiSpec, validator] = schema({
 		0: "Shows the current directory structure of the project, all public and private modules/functions/structs/enums/impls/traits, and any orphaned modules (if present)",
 	},
 	insertSource: {
-		0: "Creates a file if does not exist and writes or overwrites content to it",
+		0: "Creates a file if it does not exist and writes or overwrites content to it. Automatically prepends `mod file_name;` in `main.rs` or `mod.rs`",
 		filePath:
-			"Path of file in which content will be inserted (truncated). If file is absent, it will be automatically created before insertion",
+			"Path of file in which content will be inserted (truncated). If file path doesn't exist, the file and the directories in the path will be created before insertion",
 		sourceCode:
 			"Source code content which will be used to truncate the file.",
 	},
@@ -56,6 +56,8 @@ For each function call, return a json object with function name and arguments wi
 <tool_call>
 {"name": <function-name>, "arguments": <args-json-object>}
 </tool_call>
+
+You **MUST NOT** call a particular tool twice in a row.
 
 /no_think
 `;
