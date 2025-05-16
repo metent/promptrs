@@ -36,8 +36,7 @@ impl Agent {
 				}
 				Err(err) => {
 					warn!("\n\nPrompt Generation Failed: {}", err);
-					sleep(Duration::from_secs(10));
-					continue;
+					self.prompter
 				}
 			};
 
