@@ -10,6 +10,7 @@ const Params = (
 	context: t.Array(t.String()),
 	assistant: t.Array(t.String()),
 	tool: t.Array(t.String()),
+	user: t.Array(t.String()),
 	base_url: t.String({ default: defaults.base_url }),
 	model: t.String({ default: defaults.model }),
 	to_agent: t.String(),
@@ -79,28 +80,33 @@ export class Interface {
 	}
 
 	pushAndReturn(
-		{ context, assistant, tool }: {
+		{ context, assistant, tool, user }: {
 			context: string;
 			assistant: string;
 			tool: string;
+			user: string;
 		},
 		pruneLimit = 1e5,
 	) {
-		let totalLength = context.length + assistant.length + tool.length;
+		let totalLength = context.length + assistant.length + tool.length +
+			user.length;
 		for (let i = this.params.tool.length - 1; i >= 0; i--) {
 			totalLength += this.params.context[i].length +
 				this.params.assistant[i].length +
-				this.params.tool[i].length;
+				this.params.tool[i].length +
+				this.params.user[i].length;
 			if (totalLength > pruneLimit) {
 				this.params.context = this.params.context.slice(i + 1);
 				this.params.assistant = this.params.assistant.slice(i + 1);
 				this.params.tool = this.params.tool.slice(i + 1);
+				this.params.user = this.params.user.slice(i + 1);
 				break;
 			}
 		}
 		this.params.context.push(context);
 		this.params.assistant.push(assistant);
 		this.params.tool.push(tool);
+		this.params.user.push(user);
 		console.log(JSON.stringify(this.params));
 		Deno.exit(0);
 	}
