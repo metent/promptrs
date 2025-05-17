@@ -4,7 +4,12 @@ import { Value as v } from "npm:@sinclair/typebox/value";
 import { pipeLazy } from "npm:@fxts/core";
 
 const Params = (
-	defaults: { system?: string; base_url?: string; model?: string },
+	defaults: {
+		system?: string;
+		base_url?: string;
+		model?: string;
+		api_token?: string;
+	},
 ) => t.Object({
 	system: t.String({ default: defaults.system }),
 	context: t.Array(t.String()),
@@ -14,6 +19,7 @@ const Params = (
 	base_url: t.String({ default: defaults.base_url }),
 	model: t.String({ default: defaults.model }),
 	to_agent: t.String(),
+	api_token: t.String({ default: defaults.api_token }),
 	from_agent: t.Optional(t.String()),
 	response: t.Optional(t.String()),
 });
@@ -58,7 +64,12 @@ export class Interface {
 	private params: ReturnType<typeof Params>["static"];
 
 	static async withDefaults(
-		defaults: { system?: string; base_url?: string; model?: string },
+		defaults: {
+			system?: string;
+			base_url?: string;
+			model?: string;
+			api_token?: string;
+		},
 	) {
 		return new Interface(v.Parse(
 			Params(defaults),

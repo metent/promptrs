@@ -46,7 +46,10 @@ impl Prompter {
 		let mut model_path = std::fs::canonicalize(".")?;
 		model_path.push(format!("{}.ts", self.to_agent));
 
+		#[cfg(not(target_os = "macos"))]
 		let mut command = Command::new("/usr/bin/deno");
+		#[cfg(target_os = "macos")]
+		let mut command = Command::new("/opt/homebrew/bin/deno");
 		command
 			.env("PWD", dir)
 			.current_dir(dir)

@@ -1,4 +1,5 @@
 use attohttpc::body::Json;
+use attohttpc::header::CONTENT_TYPE;
 use attohttpc::{ResponseReader, StatusCode, TextReader};
 use either::IntoEither;
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,7 @@ impl ChatReader {
 			.read_timeout(Duration::from_secs(600))
 			.into_either(api_token.is_some())
 			.right_or_else(|req| req.bearer_auth(api_token.as_slice()[0]))
+			.header(CONTENT_TYPE, "application/json")
 			.body(Json(body))
 			.send()?
 			.split();
