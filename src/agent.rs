@@ -63,6 +63,7 @@ impl Agent {
 				.map(|u| u.as_str())
 				.unwrap_or(""),
 			self.prompter.api_token.as_ref().map(|t| t.as_str()),
+			self.prompter.tool_calls.as_ref().map(|tc| tc.as_slice()),
 		)?;
 
 		reader

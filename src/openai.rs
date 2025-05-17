@@ -3,6 +3,7 @@ use attohttpc::header::CONTENT_TYPE;
 use attohttpc::{ResponseReader, StatusCode, TextReader};
 use either::IntoEither;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::io::{BufRead, BufReader, Lines};
 use std::iter::StepBy;
 use std::time::Duration;
@@ -23,6 +24,8 @@ pub enum OpenAIError {
 pub struct ChatCompletionRequest<'s> {
 	model: &'s str,
 	messages: &'s [Message<'s>],
+	#[serde(skip_serializing_if = "Option::is_none")]
+	tools: Option<&'s [Value]>,
 	stream: bool,
 }
 
@@ -68,10 +71,12 @@ impl ChatReader {
 		messages: &[Message<'_>],
 		base_url: &str,
 		api_token: Option<&str>,
+		openai_tools: Option<&[Value]>,
 	) -> Result<ChatReader, OpenAIError> {
 		let body = ChatCompletionRequest {
 			model,
 			messages,
+			tools: openai_tools,
 			stream: true,
 		};
 

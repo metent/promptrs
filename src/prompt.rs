@@ -1,6 +1,7 @@
 use crate::openai::Message;
 use serde::de::Error;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::io::{self, Read, Result, Write};
 use std::process::{Command, Stdio};
 
@@ -23,6 +24,7 @@ pub struct Prompter {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub from_agent: Option<String>,
 	pub to_agent: String,
+	pub tool_calls: Option<Vec<Value>>,
 }
 
 impl Prompter {
@@ -39,6 +41,7 @@ impl Prompter {
 			api_token: None,
 			from_agent: None,
 			to_agent: name,
+			tool_calls: None,
 		}
 	}
 
