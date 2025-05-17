@@ -183,4 +183,4 @@ for (const toolCall of toolCalls) {
 const assistant = "<tool_call>" + toolCalls.join("</tool_call>\n<tool_call>") +
 	"</tool_call>";
 
-ifc.pushAndReturn({ context, assistant, tool });
+ifc.pushAndReturn({ context, assistant, tool, user: "" });

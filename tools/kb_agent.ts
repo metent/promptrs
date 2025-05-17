@@ -36,8 +36,9 @@ const [oaiSpec, validator] = schema({
 const system = `
 You are building an interactive knowledge base using directory structure.
 - Use mkdir to create new concepts as directories
+- The name of the folders represent the content of concepts
 - Use lnSym to link related concepts (graph edges)
-- After each operation, ask a question from the user to expand the knowledge base
+- After properly storing and linking related concepts using the provided tools, ask a question from the user to rinse and repeat
 
 Knowledge Base Rules:
 1. Each concept is a directory with name used for storing content
@@ -58,6 +59,7 @@ For each function call, return a json object with function name and arguments wi
 <tool_call>
 {"name": <function-name>, "arguments": <args-json-object>}
 </tool_call>
+You may make multiple tool calls in a single response.
 
 /no_think
 `;
@@ -187,11 +189,9 @@ const dmenuAsk = async ({ question }: { question: string }) => {
 			return `<tool_response>stderr: ${error}</tool_response>\n`;
 		}
 		const userInput = await new Response(output.stdout).text();
-		return `<tool_response>The user asked: ${userInput}</tool_response>\n`;
+		return userInput;
 	} catch (err) {
-		return `<tool_response>${
-			JSON.stringify({ error: err })
-		}</tool_response>\n`;
+		return `${JSON.stringify({ error: err })}\n`;
 	}
 };
 
@@ -199,7 +199,7 @@ const dmenuAsk = async ({ question }: { question: string }) => {
 ifc.response === "" && ifc.keepAndReturn();
 
 let [_, { context, toolCalls }] = seq(
-	takeAndSkip("_", "<think>"),
+	takeAndSkip("_", "</think>"),
 	takeAllOrSkip("context", "<tool_call>"),
 	takeAndSkipMany(
 		"toolCalls",
@@ -234,11 +234,12 @@ for (const toolCall of toolCalls) {
 			validator<"inspect">(toolCall).arguments,
 		);
 	}
-	toolResp += await dmenuAsk({ question: context });
 }
+const question = context.trim();
+const user = question !== "" ? await dmenuAsk({ question }) : "";
 
 const assistant = "<tool_call>" +
 	toolCalls.join("</tool_call>\n<tool_call>") +
 	"</tool_call>";
 
-ifc.pushAndReturn({ context, assistant, tool: toolResp });
+ifc.pushAndReturn({ context, assistant, tool: toolResp, user });
