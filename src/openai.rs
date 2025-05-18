@@ -3,7 +3,7 @@ use attohttpc::header::CONTENT_TYPE;
 use attohttpc::{ResponseReader, StatusCode, TextReader};
 use either::IntoEither;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::io::{BufRead, BufReader, Lines};
 use std::iter::StepBy;
 use std::time::Duration;
@@ -25,7 +25,7 @@ pub struct ChatCompletionRequest<'s> {
 	model: &'s str,
 	messages: &'s [Message<'s>],
 	#[serde(skip_serializing_if = "Option::is_none")]
-	tools: Option<&'s [Value]>,
+	tools: Option<&'s [Map<String, Value>]>,
 	stream: bool,
 }
 
@@ -71,7 +71,7 @@ impl ChatReader {
 		messages: &[Message<'_>],
 		base_url: &str,
 		api_token: Option<&str>,
-		openai_tools: Option<&[Value]>,
+		openai_tools: Option<&[Map<String, Value>]>,
 	) -> Result<ChatReader, OpenAIError> {
 		let body = ChatCompletionRequest {
 			model,
