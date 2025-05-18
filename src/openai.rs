@@ -36,7 +36,7 @@ pub enum Message<'s> {
 		content: &'s str,
 	},
 	User {
-		content: &'s str,
+		content: String,
 	},
 	Assistant {
 		content: String,

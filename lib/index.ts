@@ -16,11 +16,12 @@ const Params = (
 	assistant: t.Array(t.String()),
 	tool: t.Array(t.String()),
 	user: t.Array(t.String()),
+	status: t.Array(t.String()),
 	base_url: t.String({ default: defaults.base_url }),
 	model: t.String({ default: defaults.model }),
 	to_agent: t.String(),
 	from_agent: t.Optional(t.String()),
-	api_token: t.String({ default: defaults.api_token }),
+	api_token: t.Optional(t.String({ default: defaults.api_token })),
 	tool_calls: t.Optional(t.Array(t.Any())),
 	response: t.Optional(t.String()),
 });
@@ -92,27 +93,32 @@ export class Interface {
 	}
 
 	pushAndReturn(
-		{ context, assistant, tool, user, tool_calls }: {
+		{ context, assistant, tool, user, status, tool_calls }: {
 			context: string;
 			assistant: string;
 			tool: string;
-			user: string;
-			tool_calls?: object[]
+			user?: string;
+			status?: string;
+			tool_calls?: object[];
 		},
 		pruneLimit = 1e5,
 	) {
+		user ??= "";
+		status ??= "";
 		let totalLength = context.length + assistant.length + tool.length +
-			user.length;
+			user.length + status.length;
 		for (let i = this.params.tool.length - 1; i >= 0; i--) {
 			totalLength += this.params.context[i].length +
 				this.params.assistant[i].length +
 				this.params.tool[i].length +
-				this.params.user[i].length;
+				this.params.user[i].length +
+				this.params.status[i].length;
 			if (totalLength > pruneLimit) {
 				this.params.context = this.params.context.slice(i + 1);
 				this.params.assistant = this.params.assistant.slice(i + 1);
 				this.params.tool = this.params.tool.slice(i + 1);
 				this.params.user = this.params.user.slice(i + 1);
+				this.params.status = this.params.status.slice(i + 1);
 				break;
 			}
 		}
@@ -120,6 +126,7 @@ export class Interface {
 		this.params.assistant.push(assistant);
 		this.params.tool.push(tool);
 		this.params.user.push(user);
+		this.params.status.push(status);
 		this.params.tool_calls = tool_calls;
 		console.log(JSON.stringify(this.params));
 		Deno.exit(0);
@@ -127,6 +134,10 @@ export class Interface {
 
 	clearTools() {
 		this.params.tool = this.params.tool.map((_) => "");
+	}
+
+	clearStatus() {
+		this.params.status = this.params.status.map((_) => "");
 	}
 }
 

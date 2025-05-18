@@ -15,6 +15,7 @@ pub struct Prompter {
 	pub assistant: Vec<String>,
 	pub tool: Vec<String>,
 	pub user: Vec<String>,
+	pub status: Vec<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub base_url: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -36,6 +37,7 @@ impl Prompter {
 			assistant: vec![],
 			tool: vec![],
 			user: vec![],
+			status: vec![],
 			base_url: None,
 			model: None,
 			api_token: None,
@@ -103,8 +105,9 @@ impl Prompter {
 			.iter()
 			.zip(self.tool.iter())
 			.zip(self.user.iter())
+			.zip(self.status.iter())
 			.zip(self.assistant.iter())
-			.map(|(((ctx, tool), user), assistant)| {
+			.map(|((((ctx, tool), user), status), assistant)| {
 				[
 					Some(Message::Assistant {
 						content: ctx.to_string() + assistant,
@@ -113,7 +116,9 @@ impl Prompter {
 						tool_call_id: "last",
 						content: tool,
 					}),
-					user.ne("").then_some(Message::User { content: user }),
+					(user.ne("") || status.ne("")).then_some(Message::User {
+						content: user.to_string() + status,
+					}),
 				]
 			})
 			.flatten()
@@ -123,7 +128,7 @@ impl Prompter {
 			.map(|sys| {
 				[
 					Message::System { content: sys },
-					Message::User { content: "" },
+					Message::User { content: "".into() },
 				]
 			})
 			.flatten()
