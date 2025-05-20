@@ -12,6 +12,7 @@ import {
 const [oaiSpec, validator] = schema({
 	addTask: {
 		0: "Adds a new task/subtask to the org file",
+		id: "Task ID (required)",
 		title: "Task title (required)",
 		parentId: "ID of parent task or 'root' for top-level tasks",
 		type: "Type ('TASK' or 'NOTE')",
@@ -47,25 +48,13 @@ const [oaiSpec, validator] = schema({
 
 // Enhanced System Prompt with Autonomous Task Handling
 const system = `
-You are an autonomous task organizer managing an org-mode file. Your primary goal is to process inputs, structure tasks, and make decisions without unnecessary user interruptions.
-
-Key Features:
-1. Tasks have IDs, priorities (A-H), deadlines, start dates, schedules, and nested subtasks
-2. Automatically categorize knowledge as notes under relevant tasks
-3. Maintain real-time status updates in the org file
+You are an autonomous task organizer managing an org-mode file. Your primary goal is to process inputs, structure tasks, and make decisions without unnecessary user interruptions. The user will provide rough inputs, but you need to properly write them and deduce the parent tasks to organize them in the task hierarchy.
 
 # Task Processing Rules
-- When you do not have any questions to ask from the user or have no pending operations to complete such as, when the user does not give any command, you just respond with '[READY]'. Only ask questions like 'What task would you like to add next?' when the user message contains '[PROMPT]'.
-- When sufficient information is available, directly execute task operations using tools
-- Only request clarification via context if critical details are missing (e.g., missing title/priority), otherwise just respond with '[READY]' after you have successfully performed the operation, or if you think you won't be able to complete the operation with the given tools.
-- Prioritize tasks based on urgency (due date) and importance (priority letter A-H)
-
-# Knowledge Organization Workflow
-1. New concepts → Auto-create top-level TASKs with default priority (C)
-2. Related information → Add as subtasks/NOTEs under relevant parent
-3. Assign priorities: A=Urgent/Important, H=Lowest
-4. Set due dates for time-sensitive tasks
-5. Maintain clean org structure with proper indentation
+- When sufficient information is available, directly execute task operations using tools, otherwise ask questions from the user
+- Your questions must primarily be related to the user or the people they are associated with. Build the knowledge base using the replies. Continue adding tasks/other knowledge if the user ignores the question.
+- Only request clarification if there is some ambiguity (e.g. Which parent task does this subtask belong to?)
+- Based on whatever is known about the user, automatically assign properties like priorities, but ask if the user is comfortable with the suggested start date, due date or deadline.
 
 # Tools
 You may call one or more functions to assist with the user query. Function signatures:
@@ -87,10 +76,12 @@ const ifc = await Interface.withDefaults({
 });
 
 const addTask = async ({
+	id,
 	title,
 	parentId = "root",
 	type = "TASK",
 }: {
+	id: string;
 	title: string;
 	parentId?: string;
 	type?: string;
@@ -99,7 +90,7 @@ const addTask = async ({
 		const content = await Deno.readTextFile("knowledge.org");
 		const lines = content.split("\n");
 
-		const taskId = crypto.randomUUID();
+		const taskId = id;
 
 		let parentPos = -1;
 		let indentLevel = 0;
@@ -712,8 +703,8 @@ const status = await Deno.readTextFile("knowledge.org").then((text) =>
 ).catch(() => "");
 if (status !== "") ifc.clearStatus();
 
-const assistant = "<tool_call>" +
-	toolCalls.join("</tool_call>\n<tool_call>") +
-	"</tool_call>";
+const assistant = "```json" +
+	toolCalls.join("```\n```json") +
+	"```";
 
 ifc.pushAndReturn({ context, assistant, tool: toolResp, user, status });
