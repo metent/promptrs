@@ -1,9 +1,10 @@
 import {
 	Interface,
+	literal,
+	opt,
 	schema,
 	seq,
 	takeAllOrSkip,
-	takeAndSkip,
 	takeAndSkipMany,
 } from "./sdk.ts";
 
@@ -54,8 +55,9 @@ Key Features:
 3. Maintain real-time status updates in the org file
 
 # Task Processing Rules
+- When you do not have any questions to ask from the user or have no pending operations to complete such as, when the user does not give any command, you just respond with '[READY]'. Only ask questions like 'What task would you like to add next?' when the user message contains '[PROMPT]'.
 - When sufficient information is available, directly execute task operations using tools
-- Only request clarification via context if critical details are missing (e.g., missing title/priority)
+- Only request clarification via context if critical details are missing (e.g., missing title/priority), otherwise just respond with '[READY]' after you have successfully performed the operation, or if you think you won't be able to complete the operation with the given tools.
 - Prioritize tasks based on urgency (due date) and importance (priority letter A-H)
 
 # Knowledge Organization Workflow
@@ -67,20 +69,21 @@ Key Features:
 
 # Tools
 You may call one or more functions to assist with the user query. Function signatures:
-<tools>
+\`\`\`json
 ${JSON.stringify(oaiSpec)}
-</tools>
+\`\`\`
 
-Return tool calls within <tool_calls> tags as JSON objects:
-{"name": "<function-name>", "arguments": <args-json-object>}
-
-/no_think
+For each function call, return a json object with function name and arguments within code blocks:
+\`\`\`json
+{"name": <function-name>, "arguments": <args-json-object>}
+\`\`\`
+You may make multiple tool calls in a single response.
 `;
 
 const ifc = await Interface.withDefaults({
 	system,
 	base_url: "https://192.168.1.35",
-	model: "Qwen3",
+	model: "Gemma-3",
 });
 
 const addTask = async ({
@@ -604,6 +607,33 @@ function calculateInsertPosition(
 	}
 }
 
+// Directory-based instruction handling
+const INSTRUCTION_DIR = "./instructions";
+
+const processInstructions = async (): Promise<string> => {
+	await Deno.mkdir(INSTRUCTION_DIR, { recursive: true });
+	let userInput = "[PROMPT].\n\n";
+
+	// Read all text files in instruction directory
+	for await (const entry of Deno.readDir(INSTRUCTION_DIR)) {
+		if (entry.isFile) {
+			const filePath = `${INSTRUCTION_DIR}/${entry.name}`;
+			try {
+				// Read content and delete file immediately
+				userInput = await Deno.readTextFile(filePath).then((c) =>
+					c.trim()
+				);
+				await Deno.remove(filePath);
+				break;
+			} catch (_err) {
+				_err;
+			}
+		}
+	}
+
+	return userInput;
+};
+
 const dmenuAsk = async ({ question }: { question: string }) => {
 	try {
 		const process = new Deno.Command("tofi", {
@@ -629,12 +659,16 @@ const dmenuAsk = async ({ question }: { question: string }) => {
 ifc.response === "" && ifc.keepAndReturn();
 
 let [_, { context, toolCalls }] = seq(
-	takeAndSkip("_", "</think>"),
-	takeAllOrSkip("context", "<tool_call>"),
+	takeAllOrSkip("context", "```"),
+	opt(literal("json")),
+	opt(literal("\n")),
 	takeAndSkipMany(
 		"toolCalls",
-		"</tool_call>",
-		takeAllOrSkip("_", "<tool_call>"),
+		"```",
+		seq(
+			opt(literal("json")),
+			literal("\n"),
+		),
 	),
 )([ifc.response, {}]);
 context = context ?? "";
@@ -668,7 +702,11 @@ for (const toolCall of toolCalls) {
 
 // Always update status with current org file content
 const question = context.trim();
-const user = question !== "" ? await dmenuAsk({ question }) : "";
+const user = question === "[READY]"
+	? await processInstructions()
+	: question !== ""
+	? await dmenuAsk({ question })
+	: "";
 const status = await Deno.readTextFile("knowledge.org").then((text) =>
 	"\nThe current contents are:\n" + text
 ).catch(() => "");

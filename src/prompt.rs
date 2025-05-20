@@ -118,7 +118,7 @@ impl Prompter {
 						content: tool,
 					}),
 					(user.ne("") || status.ne("")).then_some(Message::User {
-						content: user.to_string() + status,
+						content: status.to_string() + user,
 					}),
 				]
 			})
