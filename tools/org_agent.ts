@@ -205,6 +205,7 @@ const updateTask = async ({
 		const lines = content.split("\n");
 		let taskPos = -1;
 
+		// Find the task line with :ID: id
 		for (let i = 0; i < lines.length; i++) {
 			if (lines[i].includes(`:ID: ${id}`)) {
 				taskPos = i;
@@ -216,25 +217,31 @@ const updateTask = async ({
 			return `<tool_response>Task not found</tool_response>\n`;
 		}
 
-		const propertiesStart = taskPos;
-		let propertiesEnd = propertiesStart + 1;
-
-		while (!lines[propertiesEnd].startsWith(":END:")) {
-			propertiesEnd++;
+		// Collect all lines from taskPos until :END: line (inclusive)
+		const taskLines: string[] = [];
+		let endIndex = -1;
+		for (let i = taskPos; i < lines.length; i++) {
+			taskLines.push(lines[i]);
+			if (lines[i].trim().startsWith(":END:")) {
+				endIndex = i;
+				break;
+			}
 		}
 
-		if (priority) {
-			lines.splice(propertiesStart, 0, `:PRIORITY: ${priority}`);
+		// Check if :END: was found
+		if (endIndex === -1) {
+			return `<tool_response>Task missing :END: line</tool_response>\n`;
 		}
 
-		if (dueDate) {
-			lines.splice(propertiesStart, 0, `:DEADLINE: <${dueDate}>`);
-		}
+		// Process the task lines to update properties
+		processProperties(taskLines, priority, dueDate, scheduledDate);
 
-		if (scheduledDate) {
-			lines.splice(propertiesStart, 0, `:SCHEDULED: <${scheduledDate}>`);
-		}
+		// Replace the original lines with the modified taskLines
+		// The original slice is from taskPos to endIndex (inclusive)
+		const numLinesToRemove = endIndex - taskPos + 1;
+		lines.splice(taskPos, numLinesToRemove, ...taskLines);
 
+		// Write back the updated content
 		await Deno.writeTextFile("knowledge.org", lines.join("\n"));
 		return `<tool_response>Updated task ${id}</tool_response>\n`;
 	} catch (err) {
@@ -243,6 +250,86 @@ const updateTask = async ({
 		}</tool_response>\n`;
 	}
 };
+
+// Helper function to process properties in taskLines
+function processProperties(
+	taskLines: string[],
+	priority?: string,
+	dueDate?: string,
+	scheduledDate?: string,
+) {
+	// Process PRIORITY
+	if (priority !== undefined) {
+		let found = false;
+		for (let i = 0; i < taskLines.length; i++) {
+			const line = taskLines[i].trim();
+			if (line.startsWith(":PRIORITY:")) {
+				taskLines[i] = `:PRIORITY: ${priority}`;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			// Find the index of :END:
+			const endIdx = taskLines.findIndex((line) =>
+				line.trim().startsWith(":END:")
+			);
+			if (endIdx !== -1) {
+				// Insert before :END:
+				taskLines.splice(endIdx, 0, `:PRIORITY: ${priority}`);
+			} else {
+				// If for some reason :END: is not found (shouldn't happen), append
+				taskLines.push(`:PRIORITY: ${priority}`);
+			}
+		}
+	}
+
+	// Process DUE DATE (:DEADLINE:)
+	if (dueDate !== undefined) {
+		let found = false;
+		for (let i = 0; i < taskLines.length; i++) {
+			const line = taskLines[i].trim();
+			if (line.startsWith(":DEADLINE:")) {
+				taskLines[i] = `:DEADLINE: <${dueDate}>`;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			const endIdx = taskLines.findIndex((line) =>
+				line.trim().startsWith(":END:")
+			);
+			if (endIdx !== -1) {
+				taskLines.splice(endIdx, 0, `:DEADLINE: <${dueDate}>`);
+			} else {
+				taskLines.push(`:DEADLINE: <${dueDate}>`);
+			}
+		}
+	}
+
+	// Process SCHEDULED DATE
+	if (scheduledDate !== undefined) {
+		let found = false;
+		for (let i = 0; i < taskLines.length; i++) {
+			const line = taskLines[i].trim();
+			if (line.startsWith(":SCHEDULED:")) {
+				taskLines[i] = `:SCHEDULED: <${scheduledDate}>`;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			const endIdx = taskLines.findIndex((line) =>
+				line.trim().startsWith(":END:")
+			);
+			if (endIdx !== -1) {
+				taskLines.splice(endIdx, 0, `:SCHEDULED: <${scheduledDate}>`);
+			} else {
+				taskLines.push(`:SCHEDULED: <${scheduledDate}>`);
+			}
+		}
+	}
+}
 
 const removeTask = async ({ id }: { id: string }) => {
 	try {
