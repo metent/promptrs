@@ -1,5 +1,10 @@
 import { Type as t } from "npm:@sinclair/typebox";
-import type { TLiteral, TObject, TString } from "npm:@sinclair/typebox";
+import type {
+	TLiteral,
+	TObject,
+	TOptional,
+	TString,
+} from "npm:@sinclair/typebox";
 import { Value as v } from "npm:@sinclair/typebox/value";
 import { pipeLazy } from "npm:@fxts/core";
 
@@ -16,6 +21,7 @@ const Params = (
 	assistant: t.Array(t.String()),
 	tool: t.Array(t.String()),
 	user: t.Array(t.String()),
+	init_status: t.Optional(t.String()),
 	status: t.Array(t.String()),
 	base_url: t.String({ default: defaults.base_url }),
 	model: t.String({ default: defaults.model }),
@@ -35,7 +41,7 @@ export const schema = <
 	const validatorOpts: TObject<
 		{
 			name: TLiteral<Extract<keyof T, string>>;
-			arguments: TObject<{ [P in string]: TString }>;
+			arguments: TObject<{ [P in string]: TOptional<TString> }>;
 		}
 	>[] = [];
 	const oaiSpec = [];
@@ -87,7 +93,8 @@ export class Interface {
 		return this.params.response ?? "";
 	}
 
-	keepAndReturn() {
+	keepAndReturn(initStatus?: string) {
+		if (initStatus) this.params.init_status = initStatus;
 		console.log(JSON.stringify(this.params));
 		Deno.exit(0);
 	}
@@ -128,6 +135,7 @@ export class Interface {
 		this.params.user.push(user);
 		this.params.status.push(status);
 		this.params.tool_calls = tool_calls;
+		this.params.init_status = undefined;
 		console.log(JSON.stringify(this.params));
 		Deno.exit(0);
 	}

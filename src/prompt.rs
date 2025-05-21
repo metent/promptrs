@@ -15,6 +15,8 @@ pub struct Prompter {
 	pub assistant: Vec<String>,
 	pub tool: Vec<String>,
 	pub user: Vec<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub init_status: Option<String>,
 	pub status: Vec<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub base_url: Option<String>,
@@ -38,6 +40,7 @@ impl Prompter {
 			assistant: vec![],
 			tool: vec![],
 			user: vec![],
+			init_status: None,
 			status: vec![],
 			base_url: None,
 			model: None,
@@ -129,7 +132,12 @@ impl Prompter {
 			.map(|sys| {
 				[
 					Message::System { content: sys },
-					Message::User { content: "".into() },
+					self.init_status
+						.as_ref()
+						.map(|status| Message::User {
+							content: status.to_string(),
+						})
+						.unwrap_or(Message::User { content: "".into() }),
 				]
 			})
 			.flatten()

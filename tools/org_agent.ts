@@ -643,7 +643,14 @@ const processInstructions = async (): Promise<string> => {
 };
 
 // Main execution
-ifc.response === "" && ifc.keepAndReturn();
+if (ifc.response === "") {
+	const status = await Deno.readTextFile("knowledge.org").then((text) =>
+		`Current time: ${
+			new Date().toString()
+		}\nThe current contents are:\n${text}\n\n`
+	).catch(() => "");
+	ifc.keepAndReturn(status + await processInstructions());
+}
 
 let [_, { context, toolCalls }] = seq(
 	takeAllOrSkip("context", "```"),
