@@ -5,6 +5,7 @@ import {
 	schema,
 	seq,
 	takeAllOrSkip,
+	takeAndSkip,
 	takeAndSkipMany,
 } from "./sdk.ts";
 
@@ -16,15 +17,20 @@ const [oaiSpec, validator] = schema({
 		title: "Task title (required)",
 		parentId: "ID of parent task or 'root' for top-level tasks",
 		type: "Type ('TASK' or 'NOTE')",
+		priority: "Priority letter (A-H) (optional)",
+		startDate: "Start date in <YYYY-MM-DD Mon HH:MM> format (optional)",
+		dueDate: "Due date in <YYYY-MM-DD Tue HH:MM> format (optional)",
+		scheduleDate:
+			"Schedule date for recurring tasks in <YYYY-MM-DD Mon HH:MM-HH:MM> format (optional)",
 	},
 	updateTask: {
 		0: "Updates task properties via PATCH-like operation",
 		id: "Unique task ID to update",
-		priority: "Priority letter (A-H)",
-		startDate: "Start date in <YYYY-MM-DD Mon HH:MM> format",
-		dueDate: "Due date in <YYYY-MM-DD Tue HH:MM> format",
+		priority: "Priority letter (A-H) (optional)",
+		startDate: "Start date in <YYYY-MM-DD Mon HH:MM> format (optional)",
+		dueDate: "Due date in <YYYY-MM-DD Tue HH:MM> format (optional)",
 		scheduleDate:
-			"Schedule date for recurring tasks in <YYYY-MM-DD Mon HH:MM-HH:MM> format",
+			"Schedule date for recurring tasks in <YYYY-MM-DD Mon HH:MM-HH:MM> format (optional)",
 	},
 	removeTask: {
 		0: "Removes a task and all subtasks",
@@ -81,11 +87,19 @@ const addTask = async ({
 	title,
 	parentId = "root",
 	type = "TASK",
+	priority,
+	startDate,
+	dueDate,
+	scheduleDate,
 }: {
 	id: string;
 	title: string;
 	parentId?: string;
 	type?: string;
+	priority?: string;
+	startDate?: string;
+	dueDate?: string;
+	scheduleDate?: string;
 }) => {
 	try {
 		const content = await Deno.readTextFile("knowledge.org");
@@ -151,6 +165,10 @@ const addTask = async ({
 			":PROPERTIES:",
 			`:ID: ${taskId}`,
 			type === "TASK" ? ":TYPE: TASK" : ":TYPE: NOTE",
+			...priority ? [`:PRIORITY: ${priority}`] : [],
+			...startDate ? [`:STARTDATE: <${startDate}>`] : [],
+			...dueDate ? [`:DEADLINE: <${dueDate}>`] : [],
+			...scheduleDate ? [`:SCHEDULED: <${scheduleDate}>`] : [],
 			":END:",
 		];
 
@@ -635,6 +653,7 @@ let [_, { context, toolCalls }] = seq(
 		"toolCalls",
 		"```",
 		seq(
+			takeAndSkip("_", "```"),
 			opt(literal("json")),
 			literal("\n"),
 		),

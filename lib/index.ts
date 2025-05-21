@@ -46,7 +46,7 @@ export const schema = <
 				Object.entries(value).filter(([name, _]) => name != "0")
 					.map((
 						[name, description],
-					) => [name, t.String({ description })]),
+					) => [name, t.Optional(t.String({ description }))]),
 			),
 			{ description: value[0] },
 		);
@@ -211,6 +211,18 @@ export function whitespace<Curr>(
 	[input, state]: [string, Curr],
 ): [string, Curr] {
 	return [input.trimStart(), state];
+}
+
+export function opt<Curr, Next>(
+	inner: Parser<Curr, Next>,
+): Parser<Curr, Curr | Next> {
+	return ([input, state]: [string, Curr]) => {
+		try {
+			return inner([input, state]);
+		} catch (_err) {
+			return [input, state];
+		}
+	};
 }
 
 export function literal<Curr>(str: string): Parser<Curr, Curr> {
