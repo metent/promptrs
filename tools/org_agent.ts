@@ -18,19 +18,15 @@ const [oaiSpec, validator] = schema({
 		parentId: "ID of parent task or 'root' for top-level tasks",
 		type: "Type ('TASK' or 'NOTE')",
 		priority: "Priority letter (A-H) (optional)",
-		startDate: "Start date in <YYYY-MM-DD Mon HH:MM> format (optional)",
-		dueDate: "Due date in <YYYY-MM-DD Tue HH:MM> format (optional)",
-		scheduleDate:
-			"Schedule date for recurring tasks in <YYYY-MM-DD Mon HH:MM-HH:MM> format (optional)",
+		scheduledDate: "Scheduled date in org-mode date format (optional)",
+		dueDate: "Due date in org-mode date format (optional)",
 	},
 	updateTask: {
 		0: "Updates task properties via PATCH-like operation",
 		id: "Unique task ID to update",
 		priority: "Priority letter (A-H) (optional)",
-		startDate: "Start date in <YYYY-MM-DD Mon HH:MM> format (optional)",
-		dueDate: "Due date in <YYYY-MM-DD Tue HH:MM> format (optional)",
-		scheduleDate:
-			"Schedule date for recurring tasks in <YYYY-MM-DD Mon HH:MM-HH:MM> format (optional)",
+		scheduledDate: "Scheduled date in org-mode date format (optional)",
+		dueDate: "Due date in org-mode date format (optional)",
 	},
 	removeTask: {
 		0: "Removes a task and all subtasks",
@@ -40,15 +36,13 @@ const [oaiSpec, validator] = schema({
 		0: "Moves a task under a new parent",
 		id: "ID of task to move",
 		newParentId: "New parent task ID or 'root'",
-		position:
-			"Position relative to siblings ('first', 'last', index number)",
+		position: "Position relative to siblings ('first', 'last', index number)",
 	},
 	copyTask: {
 		0: "Copies a task with all subtasks under new parent",
 		id: "ID of task to copy",
 		newParentId: "New parent task ID or 'root'",
-		position:
-			"Position relative to siblings ('first', 'last', index number)",
+		position: "Position relative to siblings ('first', 'last', index number)",
 	},
 });
 
@@ -88,18 +82,16 @@ const addTask = async ({
 	parentId = "root",
 	type = "TASK",
 	priority,
-	startDate,
+	scheduledDate,
 	dueDate,
-	scheduleDate,
 }: {
 	id: string;
 	title: string;
 	parentId?: string;
 	type?: string;
 	priority?: string;
-	startDate?: string;
+	scheduledDate?: string;
 	dueDate?: string;
-	scheduleDate?: string;
 }) => {
 	try {
 		const content = await Deno.readTextFile("knowledge.org");
@@ -166,9 +158,8 @@ const addTask = async ({
 			`:ID: ${taskId}`,
 			type === "TASK" ? ":TYPE: TASK" : ":TYPE: NOTE",
 			...priority ? [`:PRIORITY: ${priority}`] : [],
-			...startDate ? [`:STARTDATE: <${startDate}>`] : [],
-			...dueDate ? [`:DEADLINE: <${dueDate}>`] : [],
-			...scheduleDate ? [`:SCHEDULED: <${scheduleDate}>`] : [],
+			...dueDate ? [`:DEADLINE: ${dueDate}`] : [],
+			...scheduledDate ? [`:SCHEDULED: ${scheduledDate}`] : [],
 			":END:",
 		];
 
@@ -201,15 +192,13 @@ const addTask = async ({
 const updateTask = async ({
 	id,
 	priority,
-	startDate,
 	dueDate,
-	scheduleDate,
+	scheduledDate,
 }: {
 	id: string;
 	priority?: string;
-	startDate?: string;
 	dueDate?: string;
-	scheduleDate?: string;
+	scheduledDate?: string;
 }) => {
 	try {
 		const content = await Deno.readTextFile("knowledge.org");
@@ -238,16 +227,12 @@ const updateTask = async ({
 			lines.splice(propertiesStart, 0, `:PRIORITY: ${priority}`);
 		}
 
-		if (startDate) {
-			lines.splice(propertiesStart, 0, `:STARTDATE: <${startDate}>`);
-		}
-
 		if (dueDate) {
 			lines.splice(propertiesStart, 0, `:DEADLINE: <${dueDate}>`);
 		}
 
-		if (scheduleDate) {
-			lines.splice(propertiesStart, 0, `:SCHEDULED: <${scheduleDate}>`);
+		if (scheduledDate) {
+			lines.splice(propertiesStart, 0, `:SCHEDULED: <${scheduledDate}>`);
 		}
 
 		await Deno.writeTextFile("knowledge.org", lines.join("\n"));
@@ -707,4 +692,4 @@ const assistant = "```json" +
 	toolCalls.join("```\n```json") +
 	"```";
 
-ifc.pushAndReturn({ context, assistant, tool: toolResp, user, status });
+ifc.pushAndReturn({ context, assistant, tool: toolResp, user, status }, 3e5);
