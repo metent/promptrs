@@ -55,6 +55,7 @@ You are an autonomous task organizer managing an org-mode file. Your primary goa
 - Your questions must primarily be related to the user or the people they are associated with. Build the knowledge base using the replies. Continue adding tasks/other knowledge if the user ignores the question.
 - Only request clarification if there is some ambiguity (e.g. Which parent task does this subtask belong to?)
 - Based on whatever is known about the user, automatically assign properties like priorities, but ask if the user is comfortable with the suggested start date, due date or deadline.
+- Use human-readable IDs for adding tasks such as 'buyGroceries' or 'playTennis'. Keep the IDs short (less than 15 characters).
 
 # Tools
 You may call one or more functions to assist with the user query. Function signatures:
@@ -603,47 +604,24 @@ const INSTRUCTION_DIR = "./instructions";
 
 const processInstructions = async (): Promise<string> => {
 	await Deno.mkdir(INSTRUCTION_DIR, { recursive: true });
-	let userInput = "[PROMPT].\n\n";
+	let userInput = "";
+	let [entry] = Deno.readDirSync(INSTRUCTION_DIR).toArray();
 
 	// Read all text files in instruction directory
-	for await (const entry of Deno.readDir(INSTRUCTION_DIR)) {
-		if (entry.isFile) {
-			const filePath = `${INSTRUCTION_DIR}/${entry.name}`;
-			try {
-				// Read content and delete file immediately
-				userInput = await Deno.readTextFile(filePath).then((c) =>
-					c.trim()
-				);
-				await Deno.remove(filePath);
-				break;
-			} catch (_err) {
-				_err;
-			}
-		}
+	while (!entry || !entry.isFile) {
+		new Deno.Command("instruct").outputSync();
+		entry = Deno.readDirSync(INSTRUCTION_DIR).toArray()[0];
+	}
+	const filePath = `${INSTRUCTION_DIR}/${entry.name}`;
+	try {
+		// Read content and delete file immediately
+		userInput = await Deno.readTextFile(filePath).then((c) => c.trim());
+		await Deno.remove(filePath);
+	} catch (_err) {
+		_err;
 	}
 
 	return userInput;
-};
-
-const dmenuAsk = async ({ question }: { question: string }) => {
-	try {
-		const process = new Deno.Command("tofi", {
-			args: ["--prompt-text", question],
-			stdin: "null",
-			stdout: "piped",
-			stderr: "piped",
-		})
-			.spawn();
-		const output = await process.output();
-		if (output.code) {
-			const error = await new Response(output.stderr).text();
-			return `stderr: ${error}\n`;
-		}
-		const userInput = await new Response(output.stdout).text();
-		return userInput;
-	} catch (err) {
-		return `${JSON.stringify({ error: err })}\n`;
-	}
 };
 
 // Main execution
@@ -693,13 +671,9 @@ for (const toolCall of toolCalls) {
 
 // Always update status with current org file content
 const question = context.trim();
-const user = question === "[READY]"
-	? await processInstructions()
-	: question !== ""
-	? await dmenuAsk({ question })
-	: "";
+const user = question !== "" ? await processInstructions() : "";
 const status = await Deno.readTextFile("knowledge.org").then((text) =>
-	"\nThe current contents are:\n" + text
+	`Current time: ${new Date().toString()}\nThe current contents are:\n` + text
 ).catch(() => "");
 if (status !== "") ifc.clearStatus();
 
