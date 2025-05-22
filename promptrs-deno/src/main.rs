@@ -79,7 +79,7 @@ pub struct RunArgs {
 impl Prompter for RunArgs {
 	fn run(&self, prompt: &Prompt) -> io::Result<Prompt> {
 		let mut model_path = std::fs::canonicalize(".")?;
-		model_path.push(format!("{}.ts", prompt.to_agent));
+		model_path.push(format!("{}", self.name));
 
 		#[cfg(not(target_os = "macos"))]
 		let mut command = Command::new("/usr/bin/deno");
