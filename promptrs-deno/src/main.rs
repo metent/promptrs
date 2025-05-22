@@ -6,7 +6,7 @@ use serde::de::Error;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::{OpenOptions, create_dir_all};
-use std::io::{self, Read, Write};
+use std::io::{Error, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode, Stdio};
 
@@ -77,7 +77,9 @@ pub struct RunArgs {
 }
 
 impl Prompter for RunArgs {
-	fn run(&self, prompt: &Prompt) -> io::Result<Prompt> {
+	type Error = Error;
+
+	fn run(&self, prompt: &Prompt) -> Result<Prompt, Error> {
 		let mut model_path = std::fs::canonicalize(".")?;
 		model_path.push(format!("{}", self.name));
 

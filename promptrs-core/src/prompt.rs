@@ -1,7 +1,7 @@
 use crate::openai::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::io::Result;
+use std::fmt::Display;
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub struct Prompt {
@@ -30,7 +30,9 @@ pub struct Prompt {
 }
 
 pub trait Prompter {
-	fn run(&self, prompt: &Prompt) -> Result<Prompt>;
+	type Error: Display;
+
+	fn run(&self, prompt: &Prompt) -> Result<Prompt, Self::Error>;
 
 	fn messages<'p>(&self, prompt: &'p Prompt) -> Vec<Message<'p>> {
 		let iter = prompt
