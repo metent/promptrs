@@ -1,42 +1,33 @@
 use crate::openai::{ChatReader, OpenAIError};
-use crate::prompt::Prompter;
-use env_logger::Target;
+use crate::prompt::{Prompt, Prompter};
 use log::{info, warn};
-use std::io;
 use std::thread::sleep;
 use std::time::Duration;
 
-pub struct Agent {
-	prompter: Prompter,
-	dir: String,
-	allowed: Vec<String>,
+pub struct Agent<P: Prompter> {
+	prompter: P,
+	prompt: Prompt,
 }
 
-impl Agent {
-	pub fn new(name: String, dir: String, allowed: Vec<String>) -> io::Result<Self> {
-		env_logger::builder()
-			.target(Target::Stderr)
-			.filter_level(log::LevelFilter::Info)
-			.init();
-
-		Ok(Self {
-			prompter: Prompter::new(name),
-			dir,
-			allowed,
-		})
+impl<P: Prompter> Agent<P> {
+	pub fn new(prompter: P) -> Self {
+		Self {
+			prompter,
+			prompt: Prompt::default(),
+		}
 	}
 
 	pub fn process(mut self) {
 		loop {
-			self.prompter = match self.prompter.run(&self.dir, &self.allowed) {
+			self.prompt = match self.prompter.run(&self.prompt) {
 				Ok(mut res) => {
 					info!("\n\nGenerated prompt: {:?}", res);
-					_ = res.from_agent.insert(self.prompter.to_agent);
+					_ = res.from_agent.insert(self.prompt.to_agent);
 					res
 				}
 				Err(err) => {
 					warn!("\n\nPrompt Generation Failed: {}", err);
-					self.prompter
+					self.prompt
 				}
 			};
 
@@ -49,21 +40,21 @@ impl Agent {
 				}
 			};
 
-			_ = self.prompter.response.insert(raw_response);
+			_ = self.prompt.response.insert(raw_response);
 		}
 	}
 
 	fn chat_completion(&self) -> Result<String, OpenAIError> {
 		let reader = ChatReader::new(
-			&self.prompter.model.as_ref().map_or("", |m| m.as_str()),
-			&self.prompter.messages(),
-			self.prompter
+			&self.prompt.model.as_ref().map_or("", |m| m.as_str()),
+			&self.prompter.messages(&self.prompt),
+			self.prompt
 				.base_url
 				.as_ref()
 				.map(|u| u.as_str())
 				.unwrap_or(""),
-			self.prompter.api_token.as_ref().map(|t| t.as_str()),
-			self.prompter.tool_calls.as_ref().map(|tc| tc.as_slice()),
+			self.prompt.api_token.as_ref().map(|t| t.as_str()),
+			self.prompt.tool_calls.as_ref().map(|tc| tc.as_slice()),
 		)?;
 
 		reader
