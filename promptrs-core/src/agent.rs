@@ -58,7 +58,7 @@ impl<P: Prompter> Agent<P> {
 			self.prompt.tool_calls.as_ref().map(|tc| tc.as_slice()),
 		)?;
 
-		reader
+		let response = reader
 			.stream()
 			.into_iter()
 			.try_fold(String::new(), |acc, chunk| {
@@ -70,6 +70,9 @@ impl<P: Prompter> Agent<P> {
 				print!("{}", text);
 				io::stdout().flush().map_err(|_| OpenAIError::Chunk)?;
 				Ok(acc + text.as_str())
-			})
+			});
+		println!("\n----------END_OF_RESPONSE----------\n\n");
+
+		response
 	}
 }
