@@ -1,6 +1,7 @@
 use crate::openai::{ChatReader, OpenAIError};
 use crate::prompt::{Prompt, Prompter};
 use log::{info, warn};
+use std::io::{self, Write};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -67,6 +68,7 @@ impl<P: Prompter> Agent<P> {
 					.filter_map(|c| c.delta.content)
 					.fold("".to_string(), |acc, s| acc + s.as_str());
 				print!("{}", text);
+				io::stdout().flush().map_err(|_| OpenAIError::Chunk)?;
 				Ok(acc + text.as_str())
 			})
 	}
