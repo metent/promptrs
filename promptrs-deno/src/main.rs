@@ -2,7 +2,7 @@ use argh::FromArgs;
 use env_logger::Target;
 use log::info;
 use promptrs_core::{Agent, Prompt, Prompter};
-use serde::de::Error;
+use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::{OpenOptions, create_dir_all};
@@ -107,7 +107,7 @@ impl Prompter for RunArgs {
 		let (Some(mut stdin), Some(mut stdout), Some(mut stderr)) =
 			(child.stdin.take(), child.stdout.take(), child.stderr.take())
 		else {
-			return Err(io::Error::last_os_error());
+			return Err(Error::last_os_error());
 		};
 		stdin.write_all(serde_json::to_string(&prompt)?.as_bytes())?;
 		drop(stdin);
