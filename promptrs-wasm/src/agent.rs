@@ -1,6 +1,6 @@
 use crate::prompt::{ImportChat, WasmPrompter};
 use log::{info, warn};
-use std::path::PathBuf;
+use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 use wasmtime::component::{Component, Linker};
@@ -12,7 +12,7 @@ pub struct ChatLoop {
 }
 
 impl ChatLoop {
-	pub fn new(path: PathBuf) -> Result<Self, Error> {
+	pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
 		let engine = Engine::default();
 		let component = Component::from_file(&engine, &path)?;
 		let mut linker = Linker::new(&engine);
