@@ -36,19 +36,21 @@ const [oaiSpec, validator] = schema({
 		0: "Moves a task under a new parent",
 		id: "ID of task to move",
 		newParentId: "New parent task ID or 'root'",
-		position: "Position relative to siblings ('first', 'last', index number)",
+		position:
+			"Position relative to siblings ('first', 'last', index number)",
 	},
 	copyTask: {
 		0: "Copies a task with all subtasks under new parent",
 		id: "ID of task to copy",
 		newParentId: "New parent task ID or 'root'",
-		position: "Position relative to siblings ('first', 'last', index number)",
+		position:
+			"Position relative to siblings ('first', 'last', index number)",
 	},
 });
 
 // Enhanced System Prompt with Autonomous Task Handling
 const system = `
-You are an autonomous task organizer managing an org-mode file. Your primary goal is to process inputs, structure tasks, and make decisions without unnecessary user interruptions. The user will provide rough inputs, but you need to properly write them and deduce the parent tasks to organize them in the task hierarchy.
+You are an autonomous task organizer managing an org-mode file. Your primary goal is to process inputs, structure tasks, and make decisions without unnecessary user interruptions. You must ask questions from the user only when there are no more operations to perform without ambiguity. The user will provide rough inputs, but you need to properly write them and deduce the parent tasks to organize them in the task hierarchy.
 
 # Task Processing Rules
 - When sufficient information is available, directly execute task operations using tools, otherwise ask questions from the user
@@ -73,7 +75,7 @@ You may make multiple tool calls in a single response.
 const ifc = await Interface.withDefaults({
 	system,
 	base_url: "https://192.168.1.35",
-	model: "Gemma-3",
+	model: "xLAM-2",
 });
 
 const addTask = async ({
