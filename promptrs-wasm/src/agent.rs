@@ -1,4 +1,4 @@
-use crate::prompt::{_0, WasmPrompter};
+use crate::prompt::{ComponentRunStates, WasmPrompter};
 use log::{info, warn};
 use std::path::Path;
 use std::thread::sleep;
@@ -7,18 +7,26 @@ use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Error, Result, Store};
 
 pub struct ChatLoop {
-	store: Store<_0>,
+	store: Store<ComponentRunStates>,
 	prompter: WasmPrompter,
 }
 
 impl ChatLoop {
-	pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+	pub fn new(
+		path: impl AsRef<Path>,
+		host_path: impl AsRef<Path>,
+		guest_path: impl AsRef<str>,
+	) -> Result<Self, Error> {
 		let engine = Engine::default();
 		let component = Component::from_file(&engine, &path)?;
+
 		let mut linker = Linker::new(&engine);
+		wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
 		WasmPrompter::add_to_linker(&mut linker, |state| state)?;
-		let mut store = Store::new(&engine, _0);
+
+		let mut store = Store::new(&engine, ComponentRunStates::new(host_path, guest_path)?);
 		let prompter = WasmPrompter::instantiate(&mut store, &component, &linker)?;
+
 		Ok(ChatLoop { store, prompter })
 	}
 

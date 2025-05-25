@@ -1,12 +1,15 @@
 use crate::openai::{Chat, Client, Message};
 use prompt::r#gen::chat::Host;
-use wasmtime::component::bindgen;
+use std::path::Path;
+use wasmtime::component::{ResourceTable, bindgen};
 use wasmtime::{Result, Store};
+use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{DirPerms, FilePerms};
 
 bindgen!({ world: "wasm-prompter" });
 
 impl WasmPrompter {
-	pub fn init(&self, store: &mut Store<_0>) -> Result<Client> {
+	pub fn init(&self, store: &mut Store<ComponentRunStates>) -> Result<Client> {
 		let Sys {
 			system,
 			user,
@@ -27,7 +30,12 @@ impl WasmPrompter {
 		})
 	}
 
-	pub fn build(&self, store: &mut Store<_0>, client: &mut Client, response: &str) -> Result<()> {
+	pub fn build(
+		&self,
+		store: &mut Store<ComponentRunStates>,
+		client: &mut Client,
+		response: &str,
+	) -> Result<()> {
 		let Msg {
 			assistant,
 			tool,
@@ -53,5 +61,31 @@ impl WasmPrompter {
 	}
 }
 
-pub struct _0;
-impl Host for _0 {}
+pub struct ComponentRunStates {
+	wasi_ctx: WasiCtx,
+	resource_table: ResourceTable,
+}
+
+impl ComponentRunStates {
+	pub fn new(host_path: impl AsRef<Path>, guest_path: impl AsRef<str>) -> Result<Self> {
+		Ok(ComponentRunStates {
+			wasi_ctx: WasiCtxBuilder::new()
+				.preopened_dir(&host_path, &guest_path, DirPerms::READ, FilePerms::WRITE)?
+				.build(),
+			resource_table: ResourceTable::new(),
+		})
+	}
+}
+
+impl Host for ComponentRunStates {}
+
+impl IoView for ComponentRunStates {
+	fn table(&mut self) -> &mut ResourceTable {
+		&mut self.resource_table
+	}
+}
+impl WasiView for ComponentRunStates {
+	fn ctx(&mut self) -> &mut WasiCtx {
+		&mut self.wasi_ctx
+	}
+}
