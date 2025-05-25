@@ -3,7 +3,7 @@ use prompt::r#gen::chat::Host;
 use std::path::Path;
 use wasmtime::component::{ResourceTable, bindgen};
 use wasmtime::{Result, Store};
-use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::p2::{IoView, StdoutStream, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi::{DirPerms, FilePerms};
 
 bindgen!({ world: "wasm-prompter" });
@@ -67,9 +67,14 @@ pub struct ComponentRunStates {
 }
 
 impl ComponentRunStates {
-	pub fn new(host_path: impl AsRef<Path>, guest_path: impl AsRef<str>) -> Result<Self> {
+	pub fn new(
+		host_path: impl AsRef<Path>,
+		guest_path: impl AsRef<str>,
+		stdout: impl StdoutStream + 'static,
+	) -> Result<Self> {
 		Ok(ComponentRunStates {
 			wasi_ctx: WasiCtxBuilder::new()
+				.stdout(stdout)
 				.preopened_dir(&host_path, &guest_path, DirPerms::READ, FilePerms::WRITE)?
 				.build(),
 			resource_table: ResourceTable::new(),

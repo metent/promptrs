@@ -5,6 +5,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Error, Result, Store};
+use wasmtime_wasi::p2::StdoutStream;
 
 pub struct ChatLoop {
 	store: Store<ComponentRunStates>,
@@ -16,6 +17,7 @@ impl ChatLoop {
 		path: impl AsRef<Path>,
 		host_path: impl AsRef<Path>,
 		guest_path: impl AsRef<str>,
+		stdout: impl StdoutStream + 'static,
 	) -> Result<Self, Error> {
 		let engine = Engine::default();
 		let component = Component::from_file(&engine, &path)?;
@@ -24,7 +26,10 @@ impl ChatLoop {
 		wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
 		WasmPrompter::add_to_linker(&mut linker, |state| state)?;
 
-		let mut store = Store::new(&engine, ComponentRunStates::new(host_path, guest_path)?);
+		let mut store = Store::new(
+			&engine,
+			ComponentRunStates::new(host_path, guest_path, stdout)?,
+		);
 		let prompter = WasmPrompter::instantiate(&mut store, &component, &linker)?;
 
 		Ok(ChatLoop { store, prompter })

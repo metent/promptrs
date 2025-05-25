@@ -4,9 +4,10 @@ use log::{error, info};
 use promptrs_wasm::agent::ChatLoop;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::fs::{OpenOptions, create_dir_all};
+use std::fs::{File, OpenOptions, create_dir_all};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use wasmtime_wasi::p2::OutputFile;
 
 fn main() -> ExitCode {
 	let args = argh::from_env::<Args>();
@@ -32,9 +33,30 @@ fn main() -> ExitCode {
 		}
 	}
 
-	if let Err(err) = match args.subcommand {
-		ArgCommand::Run(run_args) => ChatLoop::new(run_args.path).and_then(|agent| agent.process()),
-	} {
+	let ArgCommand::Run(RunArgs {
+		path,
+		mut binding,
+		outfile,
+	}) = args.subcommand;
+
+	let Some(split_idx) = binding.find("::") else {
+		error!("Path binding must be specified in the format <HOSTPATH>::<GUESTPATH>");
+		return ExitCode::FAILURE;
+	};
+	let guest_path = binding.split_off(split_idx + 2);
+	let host_path = &binding[..binding.len() - 2];
+
+	let file = match File::create(outfile) {
+		Ok(file) => file,
+		Err(err) => {
+			error!("Fatal error: {err}");
+			return ExitCode::FAILURE;
+		}
+	};
+
+	if let Err(err) = ChatLoop::new(path, host_path, guest_path, OutputFile::new(file))
+		.and_then(|agent| agent.process())
+	{
 		error!("Fatal Error: {err}");
 	}
 	info!("Exiting..");
@@ -66,6 +88,12 @@ pub struct RunArgs {
 	/// path of wasm file
 	#[argh(positional)]
 	pub path: String,
+	/// host to guest path binding
+	#[argh(positional)]
+	pub binding: String,
+	/// output file for wasm
+	#[argh(option, short = 'o')]
+	pub outfile: String,
 }
 
 fn get_data_dir() -> PathBuf {
