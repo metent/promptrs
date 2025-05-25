@@ -24,6 +24,7 @@ impl ChatLoop {
 
 		let mut linker = Linker::new(&engine);
 		wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
+		wasmtime_wasi_http::add_only_http_to_linker_sync(&mut linker)?;
 		WasmPrompter::add_to_linker(&mut linker, |state| state)?;
 
 		let mut store = Store::new(

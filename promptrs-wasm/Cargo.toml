@@ -14,6 +14,7 @@ wasmtime = { version = "33.0.0", default-features = false, features = ["componen
 argh = { version = "0.1.13", optional = true }
 env_logger = { version = "0.11.8", optional = true }
 wasmtime-wasi = "33.0.0"
+wasmtime-wasi-http = "33.0.0"
 
 [features]
 cli = ["argh", "env_logger"]

@@ -5,6 +5,7 @@ use wasmtime::component::{ResourceTable, bindgen};
 use wasmtime::{Result, Store};
 use wasmtime_wasi::p2::{IoView, StdoutStream, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi::{DirPerms, FilePerms};
+use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 
 bindgen!({ world: "wasm-prompter" });
 
@@ -64,6 +65,7 @@ impl WasmPrompter {
 pub struct ComponentRunStates {
 	wasi_ctx: WasiCtx,
 	resource_table: ResourceTable,
+	http_ctx: WasiHttpCtx,
 }
 
 impl ComponentRunStates {
@@ -78,6 +80,7 @@ impl ComponentRunStates {
 				.preopened_dir(&host_path, &guest_path, DirPerms::READ, FilePerms::WRITE)?
 				.build(),
 			resource_table: ResourceTable::new(),
+			http_ctx: WasiHttpCtx::new(),
 		})
 	}
 }
@@ -92,5 +95,11 @@ impl IoView for ComponentRunStates {
 impl WasiView for ComponentRunStates {
 	fn ctx(&mut self) -> &mut WasiCtx {
 		&mut self.wasi_ctx
+	}
+}
+
+impl WasiHttpView for ComponentRunStates {
+	fn ctx(&mut self) -> &mut WasiHttpCtx {
+		&mut self.http_ctx
 	}
 }
