@@ -1,4 +1,4 @@
-use crate::prompt::{ImportChat, WasmPrompter};
+use crate::prompt::{_0, WasmPrompter};
 use log::{info, warn};
 use std::path::Path;
 use std::thread::sleep;
@@ -7,8 +7,8 @@ use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Error, Result, Store};
 
 pub struct ChatLoop {
-	store: Store<WasmPrompter>,
-	bindings: ImportChat,
+	store: Store<_0>,
+	prompter: WasmPrompter,
 }
 
 impl ChatLoop {
@@ -16,15 +16,14 @@ impl ChatLoop {
 		let engine = Engine::default();
 		let component = Component::from_file(&engine, &path)?;
 		let mut linker = Linker::new(&engine);
-		ImportChat::add_to_linker(&mut linker, |state| state)?;
-		let mut store = Store::new(&engine, WasmPrompter::default());
-		let bindings = ImportChat::instantiate(&mut store, &component, &linker)?;
-		Ok(ChatLoop { store, bindings })
+		WasmPrompter::add_to_linker(&mut linker, |state| state)?;
+		let mut store = Store::new(&engine, _0);
+		let prompter = WasmPrompter::instantiate(&mut store, &component, &linker)?;
+		Ok(ChatLoop { store, prompter })
 	}
 
 	pub fn process(mut self) -> Result<()> {
-		self.bindings.call_init(&mut self.store)?;
-		let mut client = &self.store.data_mut().prompter()?.0;
+		let mut client = self.prompter.init(&mut self.store)?;
 
 		loop {
 			info!("\n\nSending prompt: {:?}", client);
@@ -37,10 +36,12 @@ impl ChatLoop {
 				}
 			};
 
-			if let Err(err) = self.bindings.call_build(&mut self.store, &raw_response) {
+			if let Err(err) = self
+				.prompter
+				.build(&mut self.store, &mut client, &raw_response)
+			{
 				warn!("\n\nPrompt Generation Failed: {}", err);
 			}
-			client = &self.store.data_mut().prompter()?.0;
 		}
 	}
 }

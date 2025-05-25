@@ -1,14 +1,23 @@
-package openai:chat;
+package prompt:gen;
 
 interface chat {
-	resource chat-completion {
-		constructor(model: string, system: string, user: string);
-		generate: func(assistant: string, tool: option<string>, tool-call-id: option<string>, user: option<string>);
+	record sys {
+		model: string,
+		system: string,
+		user: string,
+	}
+
+	record msg {
+		assistant: string,
+		tool: option<string>,
+		tool-call-id: option<string>,
+		user: option<string>,
 	}
 }
 
-world import-chat {
-	import chat;
-	export init: func();
-	export build: func(response: string);
+world wasm-prompter {
+	use chat.{sys, msg};
+
+	export init: func() -> sys;
+	export build: func(response: string) -> msg;
 }

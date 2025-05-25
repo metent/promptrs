@@ -1,32 +1,18 @@
 use crate::openai::{Chat, Client, Message};
-use openai::chat::chat::{Host, HostChatCompletion};
-use wasmtime::component::{Resource, ResourceTable, bindgen};
-use wasmtime::{Error, Result};
+use prompt::r#gen::chat::Host;
+use wasmtime::component::bindgen;
+use wasmtime::{Result, Store};
 
-#[derive(Default)]
-pub struct WasmPrompter {
-	initialized: bool,
-	table: ResourceTable,
-}
+bindgen!({ world: "wasm-prompter" });
 
 impl WasmPrompter {
-	pub fn prompter(&mut self) -> Result<&Prompter> {
-		self.table
-			.get_any_mut(0)?
-			.downcast_ref()
-			.ok_or(Error::msg("Chat not initiated"))
-	}
-}
-
-impl Host for WasmPrompter {}
-
-impl HostChatCompletion for WasmPrompter {
-	fn new(&mut self, model: String, system: String, user: String) -> Result<Resource<Prompter>> {
-		if self.initialized {
-			return Err(Error::msg("Chat already initiated"));
-		}
-
-		let key = self.table.push(Prompter(Client {
+	pub fn init(&self, store: &mut Store<_0>) -> Result<Client> {
+		let Sys {
+			system,
+			user,
+			model,
+		} = self.call_init(store)?;
+		Ok(Client {
 			chat: Chat {
 				model,
 				messages: vec![
@@ -38,45 +24,34 @@ impl HostChatCompletion for WasmPrompter {
 			},
 			api_key: None,
 			base_url: "".to_string(),
-		}))?;
-		self.initialized = true;
-
-		Ok(key)
+		})
 	}
 
-	fn generate(
-		&mut self,
-		prompter: Resource<Prompter>,
-		assistant: String,
-		tool: Option<String>,
-		tool_call_id: Option<String>,
-		user: Option<String>,
-	) -> Result<()> {
-		let messages = &mut self.table.get_mut(&prompter)?.0.chat.messages;
+	pub fn build(&self, store: &mut Store<_0>, client: &mut Client, response: &str) -> Result<()> {
+		let Msg {
+			assistant,
+			tool,
+			tool_call_id,
+			user,
+		} = self.call_build(store, response)?;
+		let messages = &mut client.chat.messages;
+
 		messages.push(Message::Assistant { content: assistant });
+
 		if let Some(tool) = tool {
 			messages.push(Message::Tool {
 				content: tool,
 				tool_call_id: tool_call_id.unwrap_or("last".into()),
 			});
 		}
+
 		if let Some(user) = user {
 			messages.push(Message::User { content: user });
 		}
-		Ok(())
-	}
 
-	fn drop(&mut self, _: Resource<Prompter>) -> Result<()> {
 		Ok(())
 	}
 }
 
-bindgen!({
-	world: "import-chat",
-	with: {
-		"openai:chat/chat/chat-completion": Prompter,
-	},
-	trappable_imports: true,
-});
-
-pub struct Prompter(pub Client);
+pub struct _0;
+impl Host for _0 {}
