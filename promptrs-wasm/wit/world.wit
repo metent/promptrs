@@ -2,6 +2,7 @@ package prompt:gen;
 
 interface chat {
 	record sys {
+		base-url: string,
 		model: string,
 		system: string,
 		user: string,

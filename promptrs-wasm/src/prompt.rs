@@ -12,9 +12,10 @@ bindgen!({ world: "wasm-prompter" });
 impl WasmPrompter {
 	pub fn init(&self, store: &mut Store<ComponentRunStates>) -> Result<Client> {
 		let Sys {
+			base_url,
+			model,
 			system,
 			user,
-			model,
 		} = self.call_init(store)?;
 		Ok(Client {
 			chat: Chat {
@@ -27,7 +28,7 @@ impl WasmPrompter {
 				stream: true,
 			},
 			api_key: None,
-			base_url: "".to_string(),
+			base_url,
 		})
 	}
 
