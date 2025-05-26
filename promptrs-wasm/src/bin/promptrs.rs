@@ -20,6 +20,7 @@ fn main() -> ExitCode {
 	}
 
 	let mut data_dir = get_data_dir();
+	let mut cache_dir = None;
 	if let Err(err) = create_dir_all(&data_dir).inspect(|_| data_dir.push("logs")) {
 		eprintln!("Error creating data directory: {:?}", err);
 	} else {
@@ -30,11 +31,14 @@ fn main() -> ExitCode {
 				.init(),
 			Err(err) => eprintln!("Error creating log file: {:?}", err),
 		}
+		data_dir.pop();
+		data_dir.push("cache");
+		cache_dir = Some(data_dir);
 	}
 
 	let ArgCommand::Run(RunArgs { path, host_dir }) = args.subcommand;
 
-	if let Err(err) = ChatLoop::new(path, host_dir).and_then(|agent| agent.process()) {
+	if let Err(err) = ChatLoop::new(path, host_dir, cache_dir).and_then(|agent| agent.process()) {
 		error!("Fatal Error: {err}");
 	}
 	info!("Exiting..");

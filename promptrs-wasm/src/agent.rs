@@ -1,10 +1,10 @@
 use crate::prompt::{ComponentRunStates, WasmPrompter};
 use log::{info, warn};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
 use wasmtime::component::{Component, Linker};
-use wasmtime::{Engine, Error, Result, Store};
+use wasmtime::{Cache, CacheConfig, Config, Engine, Error, Result, Store};
 
 pub struct ChatLoop {
 	store: Store<ComponentRunStates>,
@@ -12,8 +12,19 @@ pub struct ChatLoop {
 }
 
 impl ChatLoop {
-	pub fn new(path: impl AsRef<Path>, host_dir: impl AsRef<Path>) -> Result<Self, Error> {
-		let engine = Engine::default();
+	pub fn new(
+		path: impl AsRef<Path>,
+		host_dir: impl AsRef<Path>,
+		cache_dir: Option<PathBuf>,
+	) -> Result<Self, Error> {
+		let cache = cache_dir
+			.map(|dir| {
+				let mut cache_config = CacheConfig::new();
+				cache_config.with_directory(dir);
+				Cache::new(cache_config)
+			})
+			.transpose()?;
+		let engine = Engine::new(Config::new().cache(cache))?;
 		let component = Component::from_file(&engine, &path)?;
 
 		let mut linker = Linker::new(&engine);
