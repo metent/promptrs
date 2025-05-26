@@ -1417,31 +1417,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptrs-core"
-version = "0.1.0"
-dependencies = [
- "attohttpc",
- "either",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.12",
-]
-
-[[package]]
-name = "promptrs-deno"
-version = "0.1.0"
-dependencies = [
- "argh",
- "env_logger",
- "log",
- "promptrs-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "promptrs-wasm"
+name = "promptrs"
 version = "0.1.0"
 dependencies = [
  "argh",
