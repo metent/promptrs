@@ -4,10 +4,9 @@ use log::{error, info};
 use promptrs_wasm::agent::ChatLoop;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::fs::{File, OpenOptions, create_dir_all};
+use std::fs::{OpenOptions, create_dir_all};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use wasmtime_wasi::p2::OutputFile;
 
 fn main() -> ExitCode {
 	let args = argh::from_env::<Args>();

@@ -5,7 +5,6 @@ use std::thread::sleep;
 use std::time::Duration;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Error, Result, Store};
-use wasmtime_wasi::p2::StdoutStream;
 
 pub struct ChatLoop {
 	store: Store<ComponentRunStates>,
@@ -19,7 +18,6 @@ impl ChatLoop {
 
 		let mut linker = Linker::new(&engine);
 		wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-		wasmtime_wasi_http::add_only_http_to_linker_sync(&mut linker)?;
 		WasmPrompter::add_to_linker(&mut linker, |state| state)?;
 
 		let mut store = Store::new(&engine, ComponentRunStates::new(host_dir)?);
