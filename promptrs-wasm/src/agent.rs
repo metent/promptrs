@@ -13,12 +13,7 @@ pub struct ChatLoop {
 }
 
 impl ChatLoop {
-	pub fn new(
-		path: impl AsRef<Path>,
-		host_path: impl AsRef<Path>,
-		guest_path: impl AsRef<str>,
-		stdout: impl StdoutStream + 'static,
-	) -> Result<Self, Error> {
+	pub fn new(path: impl AsRef<Path>, host_dir: impl AsRef<Path>) -> Result<Self, Error> {
 		let engine = Engine::default();
 		let component = Component::from_file(&engine, &path)?;
 
@@ -27,10 +22,7 @@ impl ChatLoop {
 		wasmtime_wasi_http::add_only_http_to_linker_sync(&mut linker)?;
 		WasmPrompter::add_to_linker(&mut linker, |state| state)?;
 
-		let mut store = Store::new(
-			&engine,
-			ComponentRunStates::new(host_path, guest_path, stdout)?,
-		);
+		let mut store = Store::new(&engine, ComponentRunStates::new(host_dir)?);
 		let prompter = WasmPrompter::instantiate(&mut store, &component, &linker)?;
 
 		Ok(ChatLoop { store, prompter })

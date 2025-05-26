@@ -33,30 +33,9 @@ fn main() -> ExitCode {
 		}
 	}
 
-	let ArgCommand::Run(RunArgs {
-		path,
-		mut binding,
-		outfile,
-	}) = args.subcommand;
+	let ArgCommand::Run(RunArgs { path, host_dir }) = args.subcommand;
 
-	let Some(split_idx) = binding.find("::") else {
-		error!("Path binding must be specified in the format <HOSTPATH>::<GUESTPATH>");
-		return ExitCode::FAILURE;
-	};
-	let guest_path = binding.split_off(split_idx + 2);
-	let host_path = &binding[..binding.len() - 2];
-
-	let file = match File::create(outfile) {
-		Ok(file) => file,
-		Err(err) => {
-			error!("Fatal error: {err}");
-			return ExitCode::FAILURE;
-		}
-	};
-
-	if let Err(err) = ChatLoop::new(path, host_path, guest_path, OutputFile::new(file))
-		.and_then(|agent| agent.process())
-	{
+	if let Err(err) = ChatLoop::new(path, host_dir).and_then(|agent| agent.process()) {
 		error!("Fatal Error: {err}");
 	}
 	info!("Exiting..");
@@ -88,12 +67,9 @@ pub struct RunArgs {
 	/// path of wasm file
 	#[argh(positional)]
 	pub path: String,
-	/// host to guest path binding
+	/// sandboxed host directory
 	#[argh(positional)]
-	pub binding: String,
-	/// output file for wasm
-	#[argh(option, short = 'o')]
-	pub outfile: String,
+	pub host_dir: String,
 }
 
 fn get_data_dir() -> PathBuf {

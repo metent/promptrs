@@ -70,15 +70,15 @@ pub struct ComponentRunStates {
 }
 
 impl ComponentRunStates {
-	pub fn new(
-		host_path: impl AsRef<Path>,
-		guest_path: impl AsRef<str>,
-		stdout: impl StdoutStream + 'static,
-	) -> Result<Self> {
+	pub fn new(host_dir: impl AsRef<Path>) -> Result<Self> {
 		Ok(ComponentRunStates {
 			wasi_ctx: WasiCtxBuilder::new()
-				.stdout(stdout)
-				.preopened_dir(&host_path, &guest_path, DirPerms::READ, FilePerms::WRITE)?
+				.preopened_dir(
+					&host_dir,
+					".",
+					DirPerms::MUTATE,
+					FilePerms::READ | FilePerms::WRITE,
+				)?
 				.build(),
 			resource_table: ResourceTable::new(),
 			http_ctx: WasiHttpCtx::new(),
