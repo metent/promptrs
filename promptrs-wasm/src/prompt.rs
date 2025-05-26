@@ -74,7 +74,7 @@ impl ComponentRunStates {
 				.preopened_dir(
 					&host_dir,
 					".",
-					DirPerms::MUTATE,
+					DirPerms::READ | DirPerms::MUTATE,
 					FilePerms::READ | FilePerms::WRITE,
 				)?
 				.build(),
