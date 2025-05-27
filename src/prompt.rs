@@ -11,25 +11,27 @@ bindgen!({ world: "ifc" });
 pub struct Prompter<'i> {
 	generator: GuestGenerator<'i>,
 	resource: ResourceAny,
+	store: Store<ComponentRunStates>,
 }
 
 impl<'i> Prompter<'i> {
-	pub fn new(ifc: &'i Ifc, store: &mut Store<ComponentRunStates>) -> Result<Self> {
+	pub fn new(ifc: &'i Ifc, mut store: Store<ComponentRunStates>) -> Result<Self> {
 		let generator = ifc.promptrs_gen_chat().generator();
-		let resource = generator.call_constructor(store)?;
+		let resource = generator.call_constructor(&mut store)?;
 		Ok(Prompter {
 			generator,
 			resource,
+			store,
 		})
 	}
 
-	pub fn init(&self, store: &mut Store<ComponentRunStates>) -> Result<Client> {
+	pub fn init(&mut self) -> Result<Client> {
 		let Sys {
 			base_url,
 			model,
 			system,
 			user,
-		} = self.generator.call_init(store, self.resource)?;
+		} = self.generator.call_init(&mut self.store, self.resource)?;
 		Ok(Client {
 			chat: Chat {
 				model,
@@ -45,18 +47,15 @@ impl<'i> Prompter<'i> {
 		})
 	}
 
-	pub fn build(
-		&self,
-		store: &mut Store<ComponentRunStates>,
-		client: &mut Client,
-		response: &str,
-	) -> Result<()> {
+	pub fn build(&mut self, client: &mut Client, response: &str) -> Result<()> {
 		let Msg {
 			assistant,
 			tool,
 			tool_call_id,
 			user,
-		} = self.generator.call_build(store, self.resource, response)?;
+		} = self
+			.generator
+			.call_build(&mut self.store, self.resource, response)?;
 		let messages = &mut client.chat.messages;
 
 		messages.push(Message::Assistant { content: assistant });
@@ -73,6 +72,12 @@ impl<'i> Prompter<'i> {
 		}
 
 		Ok(())
+	}
+}
+
+impl Drop for Prompter<'_> {
+	fn drop(&mut self) {
+		_ = self.resource.resource_drop(&mut self.store);
 	}
 }
 

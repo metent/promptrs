@@ -36,9 +36,9 @@ impl ChatLoop {
 		Ok(ChatLoop { store, ifc })
 	}
 
-	pub fn process(mut self) -> Result<()> {
-		let prompter = Prompter::new(&self.ifc, &mut self.store)?;
-		let mut client = prompter.init(&mut self.store)?;
+	pub fn process(self) -> Result<()> {
+		let mut prompter = Prompter::new(&self.ifc, self.store)?;
+		let mut client = prompter.init()?;
 
 		loop {
 			info!("\n\nSending prompt: {:?}", client);
@@ -51,7 +51,7 @@ impl ChatLoop {
 				}
 			};
 
-			if let Err(err) = prompter.build(&mut self.store, &mut client, &raw_response) {
+			if let Err(err) = prompter.build(&mut client, &raw_response) {
 				warn!("\n\nPrompt Generation Failed: {}", err);
 			}
 		}
