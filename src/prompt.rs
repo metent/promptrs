@@ -1,21 +1,35 @@
 use crate::openai::{Chat, Client, Message};
-use prompt::r#gen::chat::Host;
+use exports::promptrs::r#gen::chat::{GuestGenerator, Msg, Sys};
 use std::path::Path;
-use wasmtime::component::{ResourceTable, bindgen};
+use wasmtime::component::{ResourceAny, ResourceTable, bindgen};
 use wasmtime::{Result, Store};
 use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi::{DirPerms, FilePerms};
 
-bindgen!({ world: "wasm-prompter" });
+bindgen!({ world: "ifc" });
 
-impl WasmPrompter {
+pub struct Prompter<'i> {
+	generator: GuestGenerator<'i>,
+	resource: ResourceAny,
+}
+
+impl<'i> Prompter<'i> {
+	pub fn new(ifc: &'i Ifc, store: &mut Store<ComponentRunStates>) -> Result<Self> {
+		let generator = ifc.promptrs_gen_chat().generator();
+		let resource = generator.call_constructor(store)?;
+		Ok(Prompter {
+			generator,
+			resource,
+		})
+	}
+
 	pub fn init(&self, store: &mut Store<ComponentRunStates>) -> Result<Client> {
 		let Sys {
 			base_url,
 			model,
 			system,
 			user,
-		} = self.call_init(store)?;
+		} = self.generator.call_init(store, self.resource)?;
 		Ok(Client {
 			chat: Chat {
 				model,
@@ -42,7 +56,7 @@ impl WasmPrompter {
 			tool,
 			tool_call_id,
 			user,
-		} = self.call_build(store, response)?;
+		} = self.generator.call_build(store, self.resource, response)?;
 		let messages = &mut client.chat.messages;
 
 		messages.push(Message::Assistant { content: assistant });
@@ -82,8 +96,6 @@ impl ComponentRunStates {
 		})
 	}
 }
-
-impl Host for ComponentRunStates {}
 
 impl IoView for ComponentRunStates {
 	fn table(&mut self) -> &mut ResourceTable {

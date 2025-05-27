@@ -1,4 +1,4 @@
-use crate::prompt::{ComponentRunStates, WasmPrompter};
+use crate::prompt::{ComponentRunStates, Ifc, Prompter};
 use log::{info, warn};
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
@@ -8,7 +8,7 @@ use wasmtime::{Cache, CacheConfig, Config, Engine, Error, Result, Store};
 
 pub struct ChatLoop {
 	store: Store<ComponentRunStates>,
-	prompter: WasmPrompter,
+	ifc: Ifc,
 }
 
 impl ChatLoop {
@@ -29,16 +29,16 @@ impl ChatLoop {
 
 		let mut linker = Linker::new(&engine);
 		wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-		WasmPrompter::add_to_linker(&mut linker, |state| state)?;
 
 		let mut store = Store::new(&engine, ComponentRunStates::new(host_dir)?);
-		let prompter = WasmPrompter::instantiate(&mut store, &component, &linker)?;
+		let ifc = Ifc::instantiate(&mut store, &component, &linker)?;
 
-		Ok(ChatLoop { store, prompter })
+		Ok(ChatLoop { store, ifc })
 	}
 
 	pub fn process(mut self) -> Result<()> {
-		let mut client = self.prompter.init(&mut self.store)?;
+		let prompter = Prompter::new(&self.ifc, &mut self.store)?;
+		let mut client = prompter.init(&mut self.store)?;
 
 		loop {
 			info!("\n\nSending prompt: {:?}", client);
@@ -51,10 +51,7 @@ impl ChatLoop {
 				}
 			};
 
-			if let Err(err) = self
-				.prompter
-				.build(&mut self.store, &mut client, &raw_response)
-			{
+			if let Err(err) = prompter.build(&mut self.store, &mut client, &raw_response) {
 				warn!("\n\nPrompt Generation Failed: {}", err);
 			}
 		}
