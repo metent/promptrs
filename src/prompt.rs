@@ -59,8 +59,16 @@ impl<'i> Prompter<'i> {
 		} = self
 			.generator
 			.call_build(&mut self.store, self.resource, response)?;
-		let messages = &mut client.chat.messages;
+		let mut messages = &mut client.chat.messages;
 		let (status_tc, status_tr) = status.unzip();
+
+		self.status_idx = match status_tc {
+			Some(_) => {
+				self.clear_status(&mut messages);
+				Some((calls.len() + 1, resps.len()))
+			}
+			None => None,
+		};
 
 		let tool_calls = calls
 			.iter()
@@ -90,12 +98,29 @@ impl<'i> Prompter<'i> {
 			messages.push(Message::User { content: user });
 		}
 
-		self.status_idx = match status_tc {
-			Some(_) => Some((calls.len(), resps.len() - 1)),
-			None => None,
-		};
-
 		Ok(())
+	}
+
+	fn clear_status(&mut self, messages: &mut [Message]) {
+		let Some((tc, tr)) = self.status_idx else {
+			return;
+		};
+		let mut flag = 0;
+		for message in messages.iter_mut().rev() {
+			match message {
+				Message::Tool { content, .. } if flag == 0 => {
+					content.remove(tr);
+					flag += 1;
+				}
+				Message::Assistant { content } if flag == 1 => {
+					content.remove(tc);
+					flag += 1;
+				}
+				_ if flag == 2 => break,
+				_ => {}
+			}
+		}
+		self.status_idx = None;
 	}
 }
 
