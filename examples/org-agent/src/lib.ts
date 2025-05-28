@@ -7,6 +7,7 @@ import {
   takeAndSkipMany,
 } from "./parse.ts";
 import { OrgTools } from "./tools.ts";
+import { assistant, status, tool } from "./util.ts";
 import type { GeneratorIfc } from "promptrs:gen/ifc";
 
 class Generator extends OrgTools implements GeneratorIfc {
@@ -36,7 +37,7 @@ You may make multiple tool calls in a single response.
     return {
       model: "xLAM-2",
       system,
-      user: "",
+      user: this.getStatus(),
       baseUrl: "https://192.168.1.35",
     };
   }
@@ -50,27 +51,42 @@ You may make multiple tool calls in a single response.
         "toolCalls",
         "```",
         seq(
-          takeAndSkip("_", "```"),
+          takeAndSkip("context", "```"),
           opt(literal("json")),
           literal("\n"),
         ),
       ),
+      takeAllOrSkip("context", "```"),
     )([response, {}]);
     context = context ?? "";
     toolCalls = toolCalls ?? [];
 
-    let toolResp = "";
+    const toolResps = [];
     for (const toolCall of toolCalls) {
       const { name, arguments: args }: { name: string; arguments: never } = JSON
         .parse(toolCall);
-      toolResp += this.tools[name](args);
+      toolResps.push(this.tools[name](args));
     }
 
-    const question = context.trim();
-    let user = this.getStatus();
-    user += question !== "" ? this.processInstructions() : "";
+    let user;
+    if (
+      context.includes("?") || context.includes("Please") ||
+      context.includes("please")
+    ) {
+      user = this.promptUser(context);
+    } else {
+      user = this.processInstructions();
+    }
 
-    return { assistant: response, tool: toolResp, toolCallId: "", user: "" };
+    return {
+      ...assistant([context, "```json\n", toolCalls, "```\n"]),
+      ...tool(["<tool_response>", toolResps, "</tool_response>\n"]),
+      ...status([
+        JSON.stringify({ name: "getStatus", arguments: {} }),
+        this.getStatus(),
+      ]),
+      user,
+    };
   }
 }
 

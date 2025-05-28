@@ -3,7 +3,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  subscribeDuration,
+  sleep,
   writeFileSync,
 } from "./wasi.ts";
 import {
@@ -79,14 +79,14 @@ export class OrgTools extends Tools {
               endOfParentProps++;
             }
             if (endOfParentProps >= lines.length) {
-              return `<tool_response>Invalid parent PROPERTIES block for ID ${parentId}</tool_response>\n`;
+              return `Invalid parent PROPERTIES block for ID ${parentId}`;
             }
             break;
           }
         }
 
         if (parentPos === -1) {
-          return `<tool_response>Parent task with ID ${parentId} not found</tool_response>\n`;
+          return `Parent task with ID ${parentId} not found`;
         }
       } else {
         endOfParentProps = lines.length;
@@ -122,11 +122,9 @@ export class OrgTools extends Tools {
         lines.join("\n").trim() + "\n",
       );
 
-      return `<tool_response>Created task "${title}" with ID ${taskId}</tool_response>\n`;
+      return `Created task "${title}" with ID ${taskId}`;
     } catch (err) {
-      return `<tool_response>Error: ${
-        JSON.stringify({ error: err })
-      }</tool_response>\n`;
+      return `Error: ${JSON.stringify({ error: err })}`;
     }
   }
 
@@ -156,7 +154,7 @@ export class OrgTools extends Tools {
       }
 
       if (taskPos === -1) {
-        return `<tool_response>Task not found</tool_response>\n`;
+        return `Task not found`;
       }
 
       // Collect all lines from taskPos until :END: line (inclusive)
@@ -172,7 +170,7 @@ export class OrgTools extends Tools {
 
       // Check if :END: was found
       if (endIndex === -1) {
-        return `<tool_response>Task missing :END: line</tool_response>\n`;
+        return `Task missing :END: line`;
       }
 
       // Process the task lines to update properties
@@ -185,11 +183,9 @@ export class OrgTools extends Tools {
 
       // Write back the updated content
       writeFileSync("knowledge.org", lines.join("\n"));
-      return `<tool_response>Updated task ${id}</tool_response>\n`;
+      return `Updated task ${id}`;
     } catch (err) {
-      return `<tool_response>${
-        JSON.stringify({ error: err })
-      }</tool_response>\n`;
+      return `${JSON.stringify({ error: err })}`;
     }
   }
 
@@ -204,7 +200,7 @@ export class OrgTools extends Tools {
       // Find the task's heading index and ID line
       const taskInfo = findTaskHeadingIndex(lines, id);
       if (!taskInfo) {
-        return `<tool_response>Task ${id} not found</tool_response>\n`;
+        return `Task ${id} not found`;
       }
       const [headingIdx] = taskInfo;
 
@@ -220,11 +216,9 @@ export class OrgTools extends Tools {
       // Save the modified content back to the file
       writeFileSync("knowledge.org", lines.join("\n"));
 
-      return `<tool_response>Task ${id} deleted successfully</tool_response>\n`;
+      return `Task ${id} deleted successfully`;
     } catch (err) {
-      return `<tool_response>${
-        JSON.stringify({ error: err })
-      }</tool_response>\n`;
+      return `${JSON.stringify({ error: err })}`;
     }
   }
 
@@ -245,7 +239,7 @@ export class OrgTools extends Tools {
       // Find the task's heading index and ID line
       const taskInfo = findTaskHeadingIndex(lines, id);
       if (!taskInfo) {
-        return `<tool_response>Task ${id} not found</tool_response>\n`;
+        return `Task ${id} not found`;
       }
       const [headingIdx] = taskInfo;
 
@@ -261,7 +255,7 @@ export class OrgTools extends Tools {
       // Validate new parent exists (if not root)
       const newParentInfo = findNewParentInfo(lines, newParentId);
       if (!newParentInfo && newParentId !== "root") {
-        return `<tool_response>New parent ${newParentId} not found</tool_response>\n`;
+        return `New parent ${newParentId} not found`;
       }
 
       // Calculate new indent level for the task's heading under new parent
@@ -302,10 +296,10 @@ export class OrgTools extends Tools {
       // Save the modified content
       writeFileSync("knowledge.org", lines.join("\n"));
 
-      return `<tool_response>Task ${id} moved successfully</tool_response>\n`;
+      return `Task ${id} moved successfully`;
     } catch (error) {
       console.error("Move task error:", error);
-      return `<tool_response>Error: ${String(error)}</tool_response>\n`;
+      return `Error: ${String(error)}`;
     }
   }
 
@@ -329,7 +323,7 @@ export class OrgTools extends Tools {
       // Find original task
       const taskInfo = findTaskHeadingIndex(lines, id);
       if (!taskInfo) {
-        return `<tool_response>Task ${id} not found</tool_response>\n`;
+        return `Task ${id} not found`;
       }
       const [headingIdx, _idLine] = taskInfo;
 
@@ -342,7 +336,7 @@ export class OrgTools extends Tools {
       const currentIndentLevel = (lines[headingIdx].match(/^(\*+)/))![1].length;
       const parentInfo = findNewParentInfo(lines, newParentId);
       if (!parentInfo && newParentId !== "root") {
-        return `<tool_response>New parent ${newParentId} not found</tool_response>\n`;
+        return `New parent ${newParentId} not found`;
       }
 
       // Calculate new indentation level for the heading
@@ -390,12 +384,24 @@ export class OrgTools extends Tools {
       // Insert and save
       lines.splice(insertPos, 0, ...adjustedBlock);
       writeFileSync("knowledge.org", lines.join("\n"));
-      return `<tool_response>Task copied. New ID: ${newId}</tool_response>\n`;
+      return `Task copied. New ID: ${newId}`;
     } catch (err) {
-      return `<tool_response>Error copying task: ${
-        JSON.stringify({ error: err })
-      }</tool_response>\n`;
+      return `Error copying task: ${JSON.stringify({ error: err })}`;
     }
+  }
+
+  promptUser(context: string) {
+    writeFileSync(
+      "knowledge.prompt",
+      context.replaceAll(/^(.*)$/gm, "> $1"),
+    );
+    let response = "";
+    while (response === "") {
+      sleep(5n);
+      const content = readFileSync("knowledge.prompt", "utf8");
+      response = content.replaceAll(/^(>.*\n?)*\n?/g, "").trim();
+    }
+    return response;
   }
 
   processInstructions() {
@@ -404,18 +410,18 @@ export class OrgTools extends Tools {
 
     // Read all text files in instruction directory
     while (!entry) {
-      subscribeDuration(10_000_000_000n);
+      sleep(5n);
       [entry, fd] = readdirSync("", descriptor());
     }
     try {
       // Read content and delete file immediately
-      userInput = readFileSync("", "utf8", fd).trim();
-      rmSync("", fd);
+      userInput = readFileSync(entry, "utf8", fd).trim();
+      rmSync(entry);
     } catch (_err) {
       _err;
     }
 
-    return userInput;
+    return userInput !== "" ? userInput : undefined;
   }
 
   getStatus() {

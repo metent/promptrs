@@ -6,8 +6,9 @@ export interface Sys {
 }
 
 export interface Msg {
-  assistant: string;
-  tool?: string;
+  assistant: [string, string, string[], string];
+  tool: [string, string[], string];
   toolCallId?: string;
+  status?: [string, string];
   user?: string;
 }

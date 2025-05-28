@@ -232,3 +232,15 @@ export function calculateInsertPosition(
       : (children.length > 0 ? children[0] : bodyStart);
   }
 }
+
+export function assistant(assistant: [string, string, string[], string]) {
+  return { assistant };
+}
+
+export function tool(tool: [string, string[], string]) {
+  return { tool };
+}
+
+export function status(status: [string, string]) {
+  return { status };
+}

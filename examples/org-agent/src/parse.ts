@@ -4,16 +4,23 @@ type Parser<Curr, Next> = (input: [string, Curr]) => [string, Next];
 
 export const seq = pipeLazy;
 
-export function takeAndSkip<Curr, K extends string>(
+export function takeAndSkip<
+  Curr extends { [P in string]?: string },
+  K extends string,
+>(
   key: K,
   to: string,
 ): Parser<Curr, Curr & { [P in K]?: string }> {
   return ([input, state]) => {
     const idx = input.indexOf(to);
     if (idx === -1) throw [input, state];
+    let prev = "";
+    if (key in state && typeof state[key] === "string") {
+      prev = state[key];
+    }
     return [input.slice(idx + to.length), {
       ...state,
-      [key]: input.slice(0, idx),
+      [key]: prev + input.slice(0, idx),
     }];
   };
 }
@@ -46,7 +53,10 @@ export function takeAndSkipMany<
   };
 }
 
-export function takeAllOrSkip<Curr, K extends string>(
+export function takeAllOrSkip<
+  Curr extends { [P in string]?: string },
+  K extends string,
+>(
   key: K,
   to: string,
 ): Parser<Curr, Curr & { [P in K]?: string }> {
@@ -54,7 +64,13 @@ export function takeAllOrSkip<Curr, K extends string>(
     const idx = input.indexOf(to);
     const end = idx === -1 ? input.length : idx;
     const remainingInput = input.slice(end + (idx === -1 ? 0 : to.length));
-    return [remainingInput, { ...state, [key]: input.slice(0, end) }];
+
+    let prev = "";
+    if (key in state && typeof state[key] === "string") {
+      prev = state[key];
+    }
+
+    return [remainingInput, { ...state, [key]: prev + input.slice(0, end) }];
   };
 }
 

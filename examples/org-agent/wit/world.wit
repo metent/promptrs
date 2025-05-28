@@ -9,9 +9,10 @@ interface chat {
 	}
 
 	record msg {
-		assistant: string,
-		tool: option<string>,
+		assistant: tuple<string, string, list<string>, string>,
+		tool: tuple<string, list<string>, string>,
 		tool-call-id: option<string>,
+		status: option<tuple<string, string>>,
 		user: option<string>,
 	}
 

@@ -47,4 +47,6 @@ export function writeFileSync(path: string, content: string) {
   fd.write(bytes, 0n);
 }
 
-export { subscribeDuration };
+export function sleep(seconds: bigint) {
+  subscribeDuration(seconds * 1_000_000_000n).block();
+}
