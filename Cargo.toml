@@ -17,6 +17,7 @@ wasmtime-wasi = "33.0.0"
 
 [features]
 cli = ["argh", "env_logger"]
+no_parts = []
 
 [[bin]]
 name = "promptrs"

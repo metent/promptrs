@@ -9,6 +9,9 @@ use std::io::{self, BufRead, BufReader, Lines, Write};
 use std::iter::StepBy;
 use std::time::Duration;
 
+#[cfg(feature = "no_parts")]
+use serde::Serializer;
+
 #[derive(Debug)]
 pub struct Client {
 	pub chat: Chat,
@@ -103,9 +106,11 @@ pub enum Message {
 		content: String,
 	},
 	Assistant {
+		#[cfg_attr(feature = "no_parts", serde(serialize_with = "join_parts"))]
 		content: Vec<Text>,
 	},
 	Tool {
+		#[cfg_attr(feature = "no_parts", serde(serialize_with = "join_parts"))]
 		content: Vec<Text>,
 		tool_call_id: String,
 	},
@@ -131,4 +136,14 @@ pub struct Choice {
 #[derive(Debug, Deserialize)]
 pub struct Delta {
 	pub content: Option<String>,
+}
+
+#[cfg(feature = "no_parts")]
+fn join_parts<S: Serializer>(parts: &Vec<Text>, serializer: S) -> Result<S::Ok, S::Error> {
+	Ok(serializer.serialize_str(
+		&parts
+			.iter()
+			.map(|part| &part.text)
+			.fold("".to_string(), |acc, s| acc + s),
+	)?)
 }
