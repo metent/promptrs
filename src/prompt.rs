@@ -1,4 +1,4 @@
-use crate::openai::{Chat, Client, Message};
+use crate::openai::{Chat, Client, Message, Text};
 use exports::promptrs::r#gen::chat::{GuestGenerator, Msg, Sys};
 use std::path::Path;
 use wasmtime::component::{ResourceAny, ResourceTable, bindgen};
@@ -12,6 +12,7 @@ pub struct Prompter<'i> {
 	generator: GuestGenerator<'i>,
 	resource: ResourceAny,
 	store: Store<ComponentRunStates>,
+	status_idx: Option<(usize, usize)>,
 }
 
 impl<'i> Prompter<'i> {
@@ -22,6 +23,7 @@ impl<'i> Prompter<'i> {
 			generator,
 			resource,
 			store,
+			status_idx: None,
 		})
 	}
 
@@ -49,18 +51,35 @@ impl<'i> Prompter<'i> {
 
 	pub fn build(&mut self, client: &mut Client, response: &str) -> Result<()> {
 		let Msg {
-			assistant,
-			tool,
+			assistant: (context, tc_open, calls, tc_close),
+			tool: (tr_open, resps, tr_close),
 			tool_call_id,
 			user,
+			status,
 		} = self
 			.generator
 			.call_build(&mut self.store, self.resource, response)?;
 		let messages = &mut client.chat.messages;
+		let (status_tc, status_tr) = status.unzip();
 
+		let tool_calls = calls
+			.iter()
+			.chain(status_tc.iter())
+			.map(|tc| format!("{tc_open}{tc}{tc_close}"));
+		let assistant = std::iter::once(context)
+			.chain(tool_calls)
+			.map(|text| Text { text })
+			.collect();
 		messages.push(Message::Assistant { content: assistant });
 
-		if let Some(tool) = tool {
+		let tool = resps
+			.iter()
+			.chain(status_tr.iter())
+			.map(|tr| Text {
+				text: format!("{tr_open}{tr}{tr_close}"),
+			})
+			.collect::<Vec<_>>();
+		if !tool.is_empty() {
 			messages.push(Message::Tool {
 				content: tool,
 				tool_call_id: tool_call_id.unwrap_or("last".into()),
@@ -70,6 +89,11 @@ impl<'i> Prompter<'i> {
 		if let Some(user) = user {
 			messages.push(Message::User { content: user });
 		}
+
+		self.status_idx = match status_tc {
+			Some(_) => Some((calls.len(), resps.len() - 1)),
+			None => None,
+		};
 
 		Ok(())
 	}

@@ -103,12 +103,18 @@ pub enum Message {
 		content: String,
 	},
 	Assistant {
-		content: String,
+		content: Vec<Text>,
 	},
 	Tool {
-		content: String,
+		content: Vec<Text>,
 		tool_call_id: String,
 	},
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(tag = "type", rename = "text")]
+pub struct Text {
+	pub text: String,
 }
 
 #[derive(Debug, Deserialize)]
