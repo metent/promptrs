@@ -1,0 +1,24 @@
+{
+  "tasks": {
+    "install": "deno install",
+    "bundle": {
+      "command": "deno run -RE -W=. --allow-run npm:esbuild --bundle '--external:wasi*' --platform=node --format=esm --outfile=dist/bundle.js src/lib.ts",
+      "dependencies": ["install"]
+    },
+    "compile": {
+      "command": "deno run -RE -W=. --allow-sys --allow-ffi npm:@swc/cli/swc -C jsc.parser.syntax=typescript -C jsc.parser.decorators=true -C jsc.transform.decoratorVersion='2022-03' -C env.targets.node=23 -o dist/compiled.js dist/bundle.js",
+      "dependencies": ["bundle"]
+    },
+    "componentize": {
+      "command": "node ./node_modules/@bytecodealliance/jco/src/jco.js componentize --wit wit/ --world-name ifc --disable http --out dist/org_agent.wasm dist/compiled.js",
+      "dependencies": ["compile"]
+    }
+  },
+  "imports": {
+    "@fxts/core": "npm:@fxts/core@^1.11.0",
+    "wasi:filesystem/preopens@0.2.5": "./types/wasi-filesystem-preopens.d.ts",
+    "wasi:clocks/monotonic-clock@0.2.5": "./types/wasi-clocks-monotonic-clock.d.ts",
+    "promptrs:gen/ifc": "./types/promptrs-gen-ifc.d.ts"
+  },
+  "vendor": true
+}

@@ -1,4 +1,4 @@
-package prompt:gen;
+package promptrs:gen;
 
 interface chat {
 	record sys {
@@ -14,13 +14,16 @@ interface chat {
 		tool-call-id: option<string>,
 		user: option<string>,
 	}
+
+	resource generator {
+		constructor();
+		init: func() -> sys;
+		build: func(response: string) -> msg;
+	}
 }
 
-world wasm-prompter {
-	use chat.{sys, msg};
-
+world ifc {
 	import wasi:clocks/monotonic-clock@0.2.5;
 	import wasi:filesystem/preopens@0.2.5;
-	export init: func() -> sys;
-	export build: func(response: string) -> msg;
+	export chat;
 }
