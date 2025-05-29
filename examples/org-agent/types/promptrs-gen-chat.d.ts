@@ -1,6 +1,10 @@
 export interface Sys {
   baseUrl: string;
+  apiKey?: string;
   model: string;
+  charLimit: bigint;
+  temperature?: number;
+  topP?: number;
   system: string;
   user: string;
 }

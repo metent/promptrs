@@ -41,6 +41,7 @@ You may make multiple tool calls in a single response.
 `;
     return {
       model: "xLAM-2",
+      charLimit: 300_000n,
       system,
       user: this.getStatus(),
       baseUrl: "https://192.168.1.35",
