@@ -33,7 +33,7 @@ impl<'i> Prompter<'i> {
 			model,
 			system,
 			user,
-		} = self.generator.call_init(&mut self.store, self.resource)?;
+		} = self.generator.call_init(&mut self.store, self.resource)??;
 		Ok(Client {
 			chat: Chat {
 				model,
@@ -58,7 +58,7 @@ impl<'i> Prompter<'i> {
 			status,
 		} = self
 			.generator
-			.call_build(&mut self.store, self.resource, response)?;
+			.call_build(&mut self.store, self.resource, response)??;
 		let mut messages = &mut client.chat.messages;
 		let (status_tc, status_tr) = status.unzip();
 

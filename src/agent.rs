@@ -5,6 +5,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Cache, CacheConfig, Config, Engine, Error, Result, Store};
+use wasmtime_wasi::p2::bindings::sync::LinkOptions;
 
 pub struct ChatLoop {
 	store: Store<ComponentRunStates>,
@@ -28,7 +29,10 @@ impl ChatLoop {
 		let component = Component::from_file(&engine, &path)?;
 
 		let mut linker = Linker::new(&engine);
-		wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
+		wasmtime_wasi::p2::add_to_linker_with_options_sync(
+			&mut linker,
+			&LinkOptions::default().clocks_timezone(true),
+		)?;
 
 		let mut store = Store::new(&engine, ComponentRunStates::new(host_dir)?);
 		let ifc = Ifc::instantiate(&mut store, &component, &linker)?;
@@ -41,7 +45,7 @@ impl ChatLoop {
 		let mut client = prompter.init()?;
 
 		loop {
-			info!("\n\nSending prompt: {:?}", client);
+			info!("\n\nSending prompt: {:#?}", client);
 			let raw_response = match client.chat_completion() {
 				Ok(res) => res,
 				Err(err) => {
