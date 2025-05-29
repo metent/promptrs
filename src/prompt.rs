@@ -15,6 +15,7 @@ pub struct Prompter<'i> {
 	generator: GuestGenerator<'i>,
 	resource: ResourceAny,
 	store: Store<ComponentRunStates>,
+	char_limit: u64,
 	status_idx: Option<(usize, usize)>,
 }
 
@@ -27,6 +28,7 @@ impl<'i> Prompter<'i> {
 			generator,
 			resource,
 			store,
+			char_limit: 0,
 			status_idx: None,
 		})
 	}
@@ -34,13 +36,21 @@ impl<'i> Prompter<'i> {
 	pub fn init(&mut self) -> Result<Client> {
 		let Sys {
 			base_url,
+			api_key,
 			model,
+			char_limit,
+			temperature,
+			top_p,
 			system,
 			user,
 		} = self.generator.call_init(&mut self.store, self.resource)??;
+
+		self.char_limit = char_limit;
 		Ok(Client {
 			chat: Chat {
 				model,
+				temperature,
+				top_p,
 				messages: vec![
 					Message::System { content: system },
 					Message::User { content: user },
@@ -48,7 +58,7 @@ impl<'i> Prompter<'i> {
 				tools: None,
 				stream: true,
 			},
-			api_key: None,
+			api_key,
 			base_url,
 		})
 	}

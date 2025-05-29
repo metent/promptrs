@@ -90,6 +90,8 @@ impl Iterator for ChatCompletionStream {
 #[derive(Serialize, Debug)]
 pub struct Chat {
 	pub model: String,
+	pub temperature: Option<f64>,
+	pub top_p: Option<f64>,
 	pub messages: Vec<Message>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tools: Option<Vec<Map<String, Value>>>,

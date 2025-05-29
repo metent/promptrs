@@ -5,7 +5,11 @@ interface chat {
 
 	record sys {
 		base-url: string,
+		api-key: option<string>,
 		model: string,
+		char-limit: u64,
+		temperature: option<f64>,
+		top-p: option<f64>,
 		system: string,
 		user: string,
 	}
