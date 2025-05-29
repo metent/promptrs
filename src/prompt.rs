@@ -101,15 +101,20 @@ impl<'i> Prompter<'i> {
 		Ok(())
 	}
 
-	fn clear_status(&mut self, messages: &mut [Message]) {
+	fn clear_status(&mut self, messages: &mut Vec<Message>) {
 		let Some((tc, tr)) = self.status_idx else {
 			return;
 		};
 		let mut flag = 0;
-		for message in messages.iter_mut().rev() {
+		let mut rm_idx = None;
+
+		for (i, message) in messages.iter_mut().enumerate().rev() {
 			match message {
 				Message::Tool { content, .. } if flag == 0 => {
 					content.remove(tr);
+					if content.is_empty() {
+						rm_idx = Some(i);
+					}
 					flag += 1;
 				}
 				Message::Assistant { content } if flag == 1 => {
@@ -119,6 +124,10 @@ impl<'i> Prompter<'i> {
 				_ if flag == 2 => break,
 				_ => {}
 			}
+		}
+
+		if let Some(i) = rm_idx {
+			messages.remove(i);
 		}
 		self.status_idx = None;
 	}
