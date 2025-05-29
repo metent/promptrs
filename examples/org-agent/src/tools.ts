@@ -16,6 +16,8 @@ import {
 import { tool, Tools } from "./meta.ts";
 
 export class OrgTools extends Tools {
+  timezone?: string;
+
   @tool("Adds a new task/subtask to the org file", {
     id: "Task ID (required)",
     title: "Task title (required)",
@@ -423,7 +425,7 @@ export class OrgTools extends Tools {
   getStatus() {
     const text = readFileSync("knowledge.org", "utf8");
     return `Current time: ${
-      new Date().toString()
+      new Date().toLocaleString("en-GB", { timeZone: this.timezone })
     }\nThe current contents are:\n${text}`;
   }
 }

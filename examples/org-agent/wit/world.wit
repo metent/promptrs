@@ -1,6 +1,8 @@
 package promptrs:gen;
 
 interface chat {
+	use wasi:filesystem/types@0.2.5.{error-code};
+
 	record sys {
 		base-url: string,
 		model: string,
@@ -17,9 +19,9 @@ interface chat {
 	}
 
 	resource generator {
-		constructor();
-		init: func() -> sys;
-		build: func(response: string) -> msg;
+		constructor(timezone: option<string>);
+		init: func() -> result<sys, error-code>;
+		build: func(response: string) -> result<msg, error-code>;
 	}
 }
 

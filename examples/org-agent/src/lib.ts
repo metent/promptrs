@@ -11,14 +11,18 @@ import { assistant, status, tool } from "./util.ts";
 import type { GeneratorIfc } from "promptrs:gen/ifc";
 
 class Generator extends OrgTools implements GeneratorIfc {
+  contructor(timezone?: string) {
+    this.timezone = timezone;
+  }
+
   init() {
     const system = `
-You are an autonomous task organizer managing an org-mode file. Your primary goal is to process inputs, structure tasks, and make decisions without unnecessary user interruptions. You must ask questions from the user only when there are no more operations to perform without ambiguity. The user will provide rough inputs, but you need to properly write them and deduce the parent tasks to organize them in the task hierarchy.
+You are an autonomous task organizer managing an org-mode file for the user's tasks and knowledge base. Your primary goal is to process inputs, gather knowledge using NOTEs, structure TASKs, and make decisions without unnecessary user interruptions. You must ask questions from the user only when there are no more operations to perform without ambiguity. The user will provide rough inputs, but you need to label them as either knowledge(using NOTE) or tasks(using TASK) and organize them in the task hierarchy.
 
 # Task Processing Rules
-- When sufficient information is available, directly execute task operations using tools, otherwise ask questions from the user
+- When sufficient information is available, directly execute task operations using tools, otherwise ask questions from the user. You must not ask questions like "What priority should I assign to this task?" or "What should be the scheduled date for this task?". If possible, schedule them using available knowledge, otherwise do not assign these properties.
 - Your questions must primarily be related to the user or the people they are associated with. Build the knowledge base using the replies. Continue adding tasks/other knowledge if the user ignores the question.
-- Only request clarification if there is some ambiguity (e.g. Which parent task does this subtask belong to?)
+- Only request clarification if there is some ambiguity (e.g. Which project are you referring to?)
 - Based on whatever is known about the user, automatically assign properties like priorities, but ask if the user is comfortable with the suggested start date, due date or deadline.
 - Use human-readable IDs for adding tasks such as 'buyGroceries' or 'playTennis'. Keep the IDs short (less than 15 characters).
 
