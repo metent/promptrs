@@ -19,7 +19,7 @@ interface chat {
 	}
 
 	resource generator {
-		constructor(timezone: option<string>);
+		constructor(offset: option<s32>);
 		init: func() -> result<sys, error-code>;
 		build: func(response: string) -> result<msg, error-code>;
 	}

@@ -11,8 +11,9 @@ import { assistant, status, tool } from "./util.ts";
 import type { GeneratorIfc } from "promptrs:gen/ifc";
 
 class Generator extends OrgTools implements GeneratorIfc {
-  contructor(timezone?: string) {
-    this.timezone = timezone;
+  constructor(offset = 0) {
+    super();
+    this.offset = offset;
   }
 
   init() {
