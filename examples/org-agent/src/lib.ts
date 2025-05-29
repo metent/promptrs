@@ -48,12 +48,12 @@ You may make multiple tool calls in a single response.
   }
 
   build(response: string) {
-    let [_, { context, toolCalls }] = seq(
+    let [_, { context, calls }] = seq(
       takeAllOrSkip("context", "```"),
       opt(literal("json")),
       opt(literal("\n")),
       takeAndSkipMany(
-        "toolCalls",
+        "calls",
         "```",
         seq(
           takeAndSkip("context", "```"),
@@ -64,12 +64,16 @@ You may make multiple tool calls in a single response.
       takeAllOrSkip("context", "```"),
     )([response, {}]);
     context = context ?? "";
-    toolCalls = toolCalls ?? [];
+    calls = calls ?? [];
 
+    const toolCalls = [];
     const toolResps = [];
-    for (const toolCall of toolCalls) {
+    for (const toolCall of calls) {
       const { name, arguments: args }: { name: string; arguments: never } = JSON
         .parse(toolCall);
+      if (!this.tools[name]) continue;
+
+      toolCalls.push(toolCall);
       toolResps.push(this.tools[name](args));
     }
 
