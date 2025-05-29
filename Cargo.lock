@@ -1424,6 +1424,7 @@ dependencies = [
  "attohttpc",
  "either",
  "env_logger",
+ "iana-time-zone",
  "log",
  "serde",
  "serde_json",

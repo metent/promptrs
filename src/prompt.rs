@@ -1,5 +1,6 @@
 use crate::openai::{Chat, Client, Message, Text};
 use exports::promptrs::r#gen::chat::{GuestGenerator, Msg, Sys};
+use iana_time_zone::get_timezone;
 use std::path::Path;
 use wasmtime::component::{ResourceAny, ResourceTable, bindgen};
 use wasmtime::{Result, Store};
@@ -18,7 +19,8 @@ pub struct Prompter<'i> {
 impl<'i> Prompter<'i> {
 	pub fn new(ifc: &'i Ifc, mut store: Store<ComponentRunStates>) -> Result<Self> {
 		let generator = ifc.promptrs_gen_chat().generator();
-		let resource = generator.call_constructor(&mut store)?;
+		let tz = get_timezone().ok();
+		let resource = generator.call_constructor(&mut store, tz.as_ref().map(|t| t.as_str()))?;
 		Ok(Prompter {
 			generator,
 			resource,
