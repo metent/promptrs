@@ -74,8 +74,8 @@ You may make multiple tool calls in a single response.
       context.includes("please")
     ) {
       user = this.promptUser(context);
-    } else {
-      user = this.processInstructions();
+    } else if (!toolCalls.length) {
+      user = this.processInstructions(context);
     }
 
     return {

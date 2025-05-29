@@ -404,24 +404,20 @@ export class OrgTools extends Tools {
     return response;
   }
 
-  processInstructions() {
-    let userInput = "";
-    let [entry, fd] = readdirSync("", descriptor());
+  processInstructions(context: string) {
+    const [entry, fd] = readdirSync("", descriptor());
 
-    // Read all text files in instruction directory
-    while (!entry) {
-      sleep(5n);
-      [entry, fd] = readdirSync("", descriptor());
-    }
-    try {
-      // Read content and delete file immediately
-      userInput = readFileSync(entry, "utf8", fd).trim();
-      rmSync(entry);
-    } catch (_err) {
-      _err;
+    if (entry) {
+      try {
+        const input = readFileSync(entry, "utf8", fd).trim();
+        rmSync(entry);
+        return input;
+      } catch (_err) {
+        _err;
+      }
     }
 
-    return userInput !== "" ? userInput : undefined;
+    return this.promptUser(context);
   }
 
   getStatus() {
