@@ -15,7 +15,8 @@ pub struct Prompter<'i> {
 	generator: GuestGenerator<'i>,
 	resource: ResourceAny,
 	store: Store<ComponentRunStates>,
-	char_limit: u64,
+	char_count: usize,
+	char_limit: usize,
 	status_idx: Option<(usize, usize)>,
 }
 
@@ -28,6 +29,7 @@ impl<'i> Prompter<'i> {
 			generator,
 			resource,
 			store,
+			char_count: 0,
 			char_limit: 0,
 			status_idx: None,
 		})
@@ -45,7 +47,7 @@ impl<'i> Prompter<'i> {
 			user,
 		} = self.generator.call_init(&mut self.store, self.resource)??;
 
-		self.char_limit = char_limit;
+		self.char_limit = usize::try_from(char_limit)?;
 		Ok(Client {
 			chat: Chat {
 				model,
@@ -91,7 +93,8 @@ impl<'i> Prompter<'i> {
 		let assistant = std::iter::once(context)
 			.chain(tool_calls)
 			.map(|text| Text { text })
-			.collect();
+			.collect::<Vec<_>>();
+		self.char_count += assistant.iter().fold(0, |acc, t| acc + t.text.len());
 		messages.push(Message::Assistant { content: assistant });
 
 		let tool = resps
@@ -101,6 +104,7 @@ impl<'i> Prompter<'i> {
 				text: format!("{tr_open}{tr}{tr_close}"),
 			})
 			.collect::<Vec<_>>();
+		self.char_count += tool.iter().fold(0, |acc, t| acc + t.text.len());
 		if !tool.is_empty() {
 			messages.push(Message::Tool {
 				content: tool,
@@ -109,8 +113,11 @@ impl<'i> Prompter<'i> {
 		}
 
 		if let Some(user) = user {
+			self.char_count += user.len();
 			messages.push(Message::User { content: user });
 		}
+
+		self.prune_history(messages);
 
 		Ok(())
 	}
@@ -144,6 +151,36 @@ impl<'i> Prompter<'i> {
 			messages.remove(i);
 		}
 		self.status_idx = None;
+	}
+
+	fn prune_history(&mut self, messages: &mut Vec<Message>) {
+		if self.char_count < self.char_limit {
+			return;
+		}
+
+		let mut prune_count = 0;
+		let mut prune_till = None;
+		for (i, message) in messages[2..].iter().enumerate() {
+			match message {
+				Message::User { content } => prune_count += content.len(),
+				Message::Assistant { content } => {
+					prune_count += content.iter().fold(0, |acc, t| acc + t.text.len())
+				}
+				Message::Tool { content, .. } => {
+					prune_count += content.iter().fold(0, |acc, t| acc + t.text.len())
+				}
+				_ => {}
+			}
+			if self.char_count - prune_count < self.char_limit {
+				prune_till = Some(i);
+				break;
+			}
+		}
+
+		if let Some(i) = prune_till {
+			messages.drain(..=i);
+			self.char_count -= prune_count;
+		}
 	}
 }
 
