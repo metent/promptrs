@@ -12,6 +12,7 @@ interface chat {
 		top-p: option<f64>,
 		system: string,
 		user: string,
+		status: option<string>,
 	}
 
 	record msg {

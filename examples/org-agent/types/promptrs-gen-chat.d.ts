@@ -7,6 +7,7 @@ export interface Sys {
   topP?: number;
   system: string;
   user: string;
+  status?: string;
 }
 
 export interface Msg {

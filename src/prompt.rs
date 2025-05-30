@@ -18,6 +18,7 @@ pub struct Prompter<'i> {
 	char_count: usize,
 	char_limit: usize,
 	status_idx: Option<(usize, usize)>,
+	user_status_idx: Option<usize>,
 }
 
 impl<'i> Prompter<'i> {
@@ -32,6 +33,7 @@ impl<'i> Prompter<'i> {
 			char_count: 0,
 			char_limit: 0,
 			status_idx: None,
+			user_status_idx: None,
 		})
 	}
 
@@ -45,9 +47,13 @@ impl<'i> Prompter<'i> {
 			top_p,
 			system,
 			user,
+			status,
 		} = self.generator.call_init(&mut self.store, self.resource)??;
 
 		self.char_limit = usize::try_from(char_limit)?;
+		if status.is_some() {
+			self.user_status_idx = Some(1);
+		}
 		Ok(Client {
 			chat: Chat {
 				model,
@@ -55,7 +61,12 @@ impl<'i> Prompter<'i> {
 				top_p,
 				messages: vec![
 					Message::System { content: system },
-					Message::User { content: user },
+					Message::User {
+						content: std::iter::once(user)
+							.chain(status.into_iter())
+							.map(|text| Text { text })
+							.collect(),
+					},
 				],
 				tools: None,
 				stream: true,
@@ -114,7 +125,9 @@ impl<'i> Prompter<'i> {
 
 		if let Some(user) = user {
 			self.char_count += user.len();
-			messages.push(Message::User { content: user });
+			messages.push(Message::User {
+				content: vec![Text { text: user }],
+			});
 		}
 
 		self.prune_history(messages);
@@ -124,6 +137,12 @@ impl<'i> Prompter<'i> {
 
 	fn clear_status(&mut self, messages: &mut Vec<Message>) {
 		let Some((tc, tr)) = self.status_idx else {
+			if let Message::User { content } = &mut messages[1] {
+				if let Some(idx) = self.user_status_idx {
+					content.remove(idx);
+					self.user_status_idx = None;
+				}
+			}
 			return;
 		};
 		let mut flag = 0;
@@ -162,7 +181,9 @@ impl<'i> Prompter<'i> {
 		let mut prune_till = None;
 		for (i, message) in messages[2..].iter().enumerate() {
 			match message {
-				Message::User { content } => prune_count += content.len(),
+				Message::User { content } => {
+					prune_count += content.iter().fold(0, |acc, t| acc + t.text.len())
+				}
 				Message::Assistant { content } => {
 					prune_count += content.iter().fold(0, |acc, t| acc + t.text.len())
 				}

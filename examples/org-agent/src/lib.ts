@@ -39,12 +39,14 @@ For each function call, return a json object with function name and arguments wi
 \`\`\`
 You may make multiple tool calls in a single response.
 `;
+    const status = this.getStatus();
     return {
+      baseUrl: "https://192.168.1.35",
       model: "xLAM-2",
       charLimit: 300_000n,
       system,
-      user: this.getStatus(),
-      baseUrl: "https://192.168.1.35",
+      user: this.processInstructions(status),
+      status,
     };
   }
 

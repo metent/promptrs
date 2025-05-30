@@ -105,7 +105,8 @@ pub enum Message {
 		content: String,
 	},
 	User {
-		content: String,
+		#[cfg_attr(feature = "no_parts", serde(serialize_with = "join_parts"))]
+		content: Vec<Text>,
 	},
 	Assistant {
 		#[cfg_attr(feature = "no_parts", serde(serialize_with = "join_parts"))]
