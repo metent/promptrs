@@ -68,23 +68,24 @@ impl Client {
 pub struct ChatCompletionStream(StepBy<Lines<BufReader<TextReader<ResponseReader>>>>);
 
 impl Iterator for ChatCompletionStream {
-	type Item = Result<ChatCompletionChunk, Error>;
+	type Item = Result<ChatCompletionChunk, io::Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0
 			.next()
-			.filter(|l| !l.as_ref().is_ok_and(|l| l == "data: [DONE]"))?
-			.ok()
-			.filter(|l| l.len() > 6)
-			.map(|l| {
-				Ok(serde_json::from_str(&l[6..]).map_err(|err| {
-					Error::from(io::Error::new(
-						io::ErrorKind::InvalidData,
-						format!("Malformed JSON: {err}"),
-					))
-				})?)
-			})
+			.and_then(|s| s.and_then(next_chunk).transpose())
 	}
+}
+
+fn next_chunk(mut s: String) -> Result<Option<ChatCompletionChunk>, io::Error> {
+	if s.find("[DONE]").is_some() {
+		return Ok(None);
+	}
+	if let Some(i) = s.find('{') {
+		s = s.split_off(i);
+	}
+	serde_json::from_str(&s)
+		.map_err(|err| io::Error::new(io::ErrorKind::InvalidData, format!("Malformed JSON: {err}")))
 }
 
 #[derive(Serialize, Debug)]
