@@ -3,6 +3,7 @@ use attohttpc::body::Json;
 use attohttpc::header::CONTENT_TYPE;
 use attohttpc::{ResponseReader, TextReader};
 use either::IntoEither;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::io::{self, BufRead, BufReader, Lines, Write};
@@ -24,19 +25,23 @@ impl Client {
 		let response = self
 			.stream()?
 			.into_iter()
-			.try_fold(String::new(), |acc, chunk| {
-				let text = chunk?
+			.fold(String::new(), |acc, chunk| {
+				let Ok(chunk) = chunk else {
+					warn!("{:?}", chunk);
+					return acc;
+				};
+				let text = chunk
 					.choices
 					.into_iter()
 					.filter_map(|c| c.delta.content)
 					.fold("".to_string(), |acc, s| acc + s.as_str());
 				print!("{}", text);
-				io::stdout().flush()?;
-				Ok(acc + text.as_str())
+				_ = io::stdout().flush();
+				acc + text.as_str()
 			});
 		println!("\n----------END_OF_RESPONSE----------\n\n");
 
-		response
+		Ok(response)
 	}
 
 	fn stream(&self) -> Result<ChatCompletionStream, Error> {
