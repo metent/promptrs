@@ -28,22 +28,27 @@ You are an autonomous task organizer managing an org-mode file for the user's ta
 - Use human-readable IDs for adding tasks such as 'buyGroceries' or 'playTennis'. Keep the IDs short (less than 15 characters).
 
 # Tools
-You may call one or more functions to assist with the user query. Function signatures:
-\`\`\`json
-${JSON.stringify(this.oaiSpec)}
-\`\`\`
 
-For each function call, return a json object with function name and arguments within code blocks:
-\`\`\`json
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+${JSON.stringify(this.oaiSpec)}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
 {"name": <function-name>, "arguments": <args-json-object>}
-\`\`\`
+</tool_call>
 You may make multiple tool calls in a single response.
 `;
     const status = this.getStatus();
     return {
-      baseUrl: "https://192.168.1.35",
-      model: "xLAM-2",
+      baseUrl: "https://192.168.1.36",
+      model: "Qwen3",
       charLimit: 300_000n,
+      temperature: 0.6,
+      topP: 0.95,
       system,
       user: this.processInstructions(status),
       status,
@@ -52,19 +57,18 @@ You may make multiple tool calls in a single response.
 
   build(response: string) {
     let [_, { context, calls }] = seq(
-      takeAllOrSkip("context", "```"),
-      opt(literal("json")),
+      opt(takeAndSkip("_", "</think>")),
+      takeAllOrSkip("context", "<tool_call>"),
       opt(literal("\n")),
       takeAndSkipMany(
         "calls",
-        "```",
+        "</tool_call>",
         seq(
-          takeAndSkip("context", "```"),
-          opt(literal("json")),
-          literal("\n"),
+          takeAndSkip("context", "<tool_call>"),
+          opt(literal("\n")),
         ),
       ),
-      takeAllOrSkip("context", "```"),
+      takeAllOrSkip("context", "<tool_call>"),
     )([response, {}]);
     context = context ?? "";
     calls = calls ?? [];
@@ -91,7 +95,7 @@ You may make multiple tool calls in a single response.
     }
 
     return {
-      ...assistant([context, "```json\n", toolCalls, "```\n"]),
+      ...assistant([context, "<tool_call>\n", toolCalls, "</tool_call>\n"]),
       ...tool(["<tool_response>", toolResps, "</tool_response>\n"]),
       ...status([
         JSON.stringify({ name: "getStatus", arguments: {} }),

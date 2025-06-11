@@ -1,11 +1,5 @@
-import {
-  descriptor,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  sleep,
-  writeFileSync,
-} from "./wasi.ts";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { sleep } from "./wasi.ts";
 import {
   calculateInsertPosition,
   findNewParentInfo,
@@ -407,11 +401,13 @@ export class OrgTools extends Tools {
   }
 
   processInstructions(context: string) {
-    const [entry, fd] = readdirSync("", descriptor());
+    const entry = readdirSync(".").find((ent) =>
+      !ent.startsWith("knowledge") && !ent.startsWith(".")
+    );
 
     if (entry) {
       try {
-        const input = readFileSync(entry, "utf8", fd).trim();
+        const input = readFileSync(entry, "utf8").trim();
         rmSync(entry);
         return input;
       } catch (_err) {
