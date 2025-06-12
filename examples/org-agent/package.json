@@ -1,0 +1,20 @@
+{
+  "name": "org-agent",
+  "module": "src/lib.ts",
+  "type": "module",
+  "scripts": {
+    "precompile": "bun install",
+    "compile": "bun componentize.sh"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.11.2",
+    "@swc/cli": "^0.7.7",
+    "@types/node": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@fxts/core": "^1.11.0"
+  }
+}
