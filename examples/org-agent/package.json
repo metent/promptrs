@@ -9,7 +9,8 @@
   "devDependencies": {
     "@bytecodealliance/jco": "^1.11.2",
     "@swc/cli": "^0.7.7",
-    "@types/node": "latest"
+    "@types/node": "latest",
+    "esbuild": "^0.25.5"
   },
   "peerDependencies": {
     "typescript": "^5"
