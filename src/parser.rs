@@ -102,13 +102,18 @@ pub fn parse_py(input: &mut &str, delims: &Option<Delims>) -> ModalResult<Respon
 
 	_ = ("```py", opt("thon")).parse_next(input)?;
 	let tool_calls = separated_foldl1(
-		repeat(0.., alt((py_func_call.map(Some), py_comment.map(|_| None)))).fold(
-			Vec::new,
-			|mut acc, s| {
-				acc.extend(s.into_iter());
-				acc
-			},
-		),
+		repeat(
+			0..,
+			alt((
+				py_func_call.map(Some),
+				py_comment.map(|_| None),
+				take_until(0.., "\n").map(|_| None),
+			)),
+		)
+		.fold(Vec::new, |mut acc, s| {
+			acc.extend(s.into_iter());
+			acc
+		}),
 		("```", take_until(0.., "```py"), "```py", opt("thon")),
 		|mut l: Vec<Function>, _, r| {
 			l.extend(r);
