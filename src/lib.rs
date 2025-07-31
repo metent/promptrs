@@ -242,6 +242,7 @@ impl<'c, S> InitState<'c, '_, S> {
 				..
 			}) if !self.tools.is_empty() => Some(format!(
 				r#"{system_base}
+
 # Tools
 
 You may call one or more functions to assist with the user query.
@@ -260,13 +261,14 @@ For each function call, return a json object with function name and arguments wi
 			)),
 			ToolCallParadigm::Pythonic if !self.tools.is_empty() => Some(format!(
 				r#"{system_base}
+
 # Tools
 
-You may call one or more functions to assist with the user query. You are provided with the following function signatures:
+You are provided with the following python APIs to assist with the user query:
 ```py
 {pydefs}
 ```
-You can invoke any of these functions by writing a python function call inside a python code block.
+You can invoke any of these tools by writing a python function call inside a python code block.
 "#,
 				pydefs = self.pydefs()
 			)),
