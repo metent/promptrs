@@ -347,15 +347,18 @@ impl<'c, S> SendState<'c, S> {
 			self.messages
 				.push(Message::Assistant(response.content.clone()));
 		}
+		let old_len = self.messages.len();
 		let called = self.execute_tools(state, response.tool_calls);
 		if called {
 			self.push_status(state);
 		}
+		let nbtc = self.messages.len() - old_len;
 
 		Ok(ReceivedState {
 			config: self.config,
 			messages: self.messages,
 			tools: self.tools,
+			nbtc,
 			status: self.status,
 			text: response.content,
 		})
@@ -512,6 +515,7 @@ pub struct ReceivedState<'c, S> {
 	config: &'c UserConfig,
 	messages: Vec<Message>,
 	tools: Vec<Box<dyn Tool<State = S>>>,
+	nbtc: usize,
 	status: Option<Box<dyn Tool<State = S>>>,
 	/// Assistant response with reasoning block removed
 	pub text: String,
@@ -528,6 +532,11 @@ impl<'c, T> ReceivedState<'c, T> {
 			tools: self.tools,
 			status: self.status,
 		}
+	}
+
+	/// Get tool call messages
+	pub fn tool_calls(&self) -> &[Message] {
+		&self.messages[self.messages.len() - self.nbtc..]
 	}
 }
 
