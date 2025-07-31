@@ -437,12 +437,10 @@ impl<'c, S> SendState<'c, S> {
 				.map(|tool| tool.call(state, &mut tool_call.arguments))
 				.unwrap_or_else(|| Ok("Function not found.".into()))
 				.unwrap_or_else(|err| err.to_string());
-			let tc = match self.config.paradigm {
-				ToolCallParadigm::JsonSchema { .. } => serde_json::to_string(&json!({
-					"name": tool_call.name,
-					"arguments": tool_call.arguments,
-				}))
-				.unwrap_or_default(),
+			let tc = match &self.config.paradigm {
+				ToolCallParadigm::JsonSchema(delims) => {
+					format_jsonschema_call(&tool_call.name, &tool_call.arguments, delims)
+				}
 				ToolCallParadigm::Pythonic => {
 					format_python_call(&tool_call.name, &tool_call.arguments)
 				}
@@ -595,6 +593,24 @@ pub trait Tool {
 	) -> serde_json::Result<String>;
 }
 
+fn format_jsonschema_call(
+	name: &str,
+	arguments: &serde_json::Map<String, serde_json::Value>,
+	ToolDelims {
+		tool_call: (start, end),
+		..
+	}: &ToolDelims,
+) -> String {
+	format!(
+		"{start}{}{end}",
+		serde_json::to_string(&json!({
+			"name": name,
+			"arguments": arguments,
+		}))
+		.unwrap_or_default()
+	)
+}
+
 fn format_python_call(
 	name: &str,
 	arguments: &serde_json::Map<String, serde_json::Value>,
@@ -606,5 +622,5 @@ fn format_python_call(
 	if args.ends_with(", ") {
 		args.truncate(args.len() - 2);
 	}
-	format!("{name}({args})")
+	format!("```py\n{name}({args})\n```")
 }
