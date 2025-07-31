@@ -134,14 +134,24 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 				if required {
 					call_stmts.push(quote! {
 						let #ident : #ty = ::promptrs::serde_json::from_value(
-							arguments.remove(#name_ref).or_else(|| arguments.remove(#index)).ok_or(::promptrs::serde::de::Error::missing_field(#name_ref))?
+							left.remove(#name_ref)
+								.or_else(|| left.remove(#index))
+								.ok_or(::promptrs::serde::de::Error::missing_field(#name_ref))?
 						)?;
+						if let Some(value) = arguments.remove(#index) {
+							arguments.insert(#name_ref.into(), value);
+						}
 					});
 				} else {
 					call_stmts.push(quote! {
 						let #ident : #ty = ::promptrs::serde_json::from_value(
-							arguments.remove(#name_ref).or_else(|| arguments.remove(#index)).unwrap_or(::promptrs::serde_json::Value::Null)
+							left.remove(#name_ref)
+								.or_else(|| left.remove(#index))
+								.unwrap_or(::promptrs::serde_json::Value::Null)
 						)?;
+						if let Some(value) = arguments.remove(#index) {
+							arguments.insert(#name_ref.into(), value);
+						}
 					});
 				}
 				if name.starts_with('_') {
@@ -202,8 +212,8 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 				#pydef
 			}
 
-			fn call(&self, #state_arg arguments: &::promptrs::Arguments) -> ::promptrs::serde_json::Result<String> {
-				let mut arguments = arguments.clone();
+			fn call(&self, #state_arg arguments: &mut ::promptrs::Arguments) -> ::promptrs::serde_json::Result<String> {
+				let mut left = arguments.clone();
 				#(#call_stmts)*
 				let result = #ident::run(#(#args,)*);
 				Ok(::std::string::ToString::to_string(&result))

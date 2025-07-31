@@ -422,7 +422,7 @@ impl<'c, S> SendState<'c, S> {
 
 	fn execute_tools(&mut self, state: &mut S, tool_calls: Vec<Function>) -> bool {
 		let mut called = false;
-		for tool_call in tool_calls {
+		for mut tool_call in tool_calls {
 			if self
 				.status
 				.as_ref()
@@ -430,6 +430,13 @@ impl<'c, S> SendState<'c, S> {
 			{
 				continue;
 			}
+			let resp = self
+				.tools
+				.iter()
+				.find(|tool| tool.name() == tool_call.name)
+				.map(|tool| tool.call(state, &mut tool_call.arguments))
+				.unwrap_or_else(|| Ok("Function not found.".into()))
+				.unwrap_or_else(|err| err.to_string());
 			let tc = match self.config.paradigm {
 				ToolCallParadigm::JsonSchema { .. } => serde_json::to_string(&json!({
 					"name": tool_call.name,
@@ -441,13 +448,6 @@ impl<'c, S> SendState<'c, S> {
 				}
 				ToolCallParadigm::None => "".into(),
 			};
-			let resp = self
-				.tools
-				.iter()
-				.find(|tool| tool.name() == tool_call.name)
-				.map(|tool| tool.call(state, &tool_call.arguments))
-				.unwrap_or_else(|| Ok("Function not found.".into()))
-				.unwrap_or_else(|err| err.to_string());
 
 			self.messages.push(Message::ToolCall((tc, resp)));
 			called = true;
@@ -472,7 +472,7 @@ impl<'c, S> SendState<'c, S> {
 		};
 
 		let status = status_fn
-			.call(state, &serde_json::Map::new())
+			.call(state, &mut serde_json::Map::new())
 			.unwrap_or("Unexpected error while serializing status!".into());
 
 		self.messages
@@ -484,7 +484,7 @@ impl<'c, S> SendState<'c, S> {
 			return;
 		};
 		let status = status_fn
-			.call(state, &serde_json::Map::new())
+			.call(state, &mut serde_json::Map::new())
 			.unwrap_or("Unexpected error while serializing status!".into());
 		self.messages
 			.push(Message::Status((status_fn.name().into(), status)));
@@ -588,7 +588,11 @@ pub trait Tool {
 	fn pydef(&self) -> &str;
 
 	/// Executes the tool function with given JSON arguments
-	fn call(&self, state: &mut Self::State, arguments: &Arguments) -> serde_json::Result<String>;
+	fn call(
+		&self,
+		state: &mut Self::State,
+		arguments: &mut Arguments,
+	) -> serde_json::Result<String>;
 }
 
 fn format_python_call(
