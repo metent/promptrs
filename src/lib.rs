@@ -27,7 +27,7 @@
 //! ## Example: Basic Workflow
 //!
 //! ```rust
-//! use promptrs::{Delims, ToolCallParadigm, UserConfig, tool};
+//! use promptrs::{ToolCallParadigm, UserConfig, tool};
 //! use std::collections::HashMap;
 //!
 //! #[derive(Default)]
@@ -39,7 +39,7 @@
 //! /// id: Unique ID for note
 //! /// title: Note title
 //! #[tool]
-//! fn add_note(state: &mut HashMap, id: String, title: String) -> String {
+//! fn add_note(state: &mut AppState, id: String, title: String) -> String {
 //!     // Actual implementation would store the note
 //!     format!("Note {id} added with title: {title}")
 //! }
@@ -49,9 +49,7 @@
 //!     let config = UserConfig::builder()
 //!         .api_key(Some("sk-examplekey".to_string()))
 //!         .temperature(Some(0.3))
-//!         .paradigm(ToolCallParadigm::Pythonic {
-//!             reasoning_delims: None,
-//!         })
+//!         .paradigm(ToolCallParadigm::Pythonic)
 //!         .char_limit(8192)
 //!         .build("https://api.openai.com".to_string(), "gpt-4".to_string());
 //!
@@ -112,6 +110,8 @@ pub struct UserConfig {
 	pub temperature: Option<f64>,
 	/// Nucleus sampling parameter for diversity control (0-1)
 	pub top_p: Option<f64>,
+	/// Delimiters for assistant content
+	pub delims: Option<Delims>,
 	/// Tool calling configuration paradigm
 	#[serde(flatten)]
 	pub paradigm: ToolCallParadigm,
@@ -148,6 +148,12 @@ impl UserConfigBuilder {
 	/// Sets Nucleus sampling parameter
 	pub fn top_p(mut self, top_p: Option<f64>) -> Self {
 		self.0.top_p = top_p;
+		self
+	}
+
+	/// Sets delimiters for assistant content
+	pub fn delims(mut self, delims: Option<Delims>) -> Self {
+		self.0.delims = delims;
 		self
 	}
 
@@ -230,13 +236,11 @@ impl<'c, S> InitState<'c, '_, S> {
 	fn system(&self) -> Option<String> {
 		let system_base = self.system?;
 		match &self.config.paradigm {
-			ToolCallParadigm::JsonSchema {
-				delims: Delims {
-					available_tools,
-					tool_call,
-					..
-				},
-			} if !self.tools.is_empty() => Some(format!(
+			ToolCallParadigm::JsonSchema(ToolDelims {
+				available_tools,
+				tool_call,
+				..
+			}) if !self.tools.is_empty() => Some(format!(
 				r#"{system_base}
 # Tools
 
@@ -254,7 +258,7 @@ For each function call, return a json object with function name and arguments wi
 				tc_end = tool_call.1,
 				oai_spec = self.jsonschema()
 			)),
-			ToolCallParadigm::Pythonic { .. } if !self.tools.is_empty() => Some(format!(
+			ToolCallParadigm::Pythonic if !self.tools.is_empty() => Some(format!(
 				r#"{system_base}
 # Tools
 
@@ -375,13 +379,17 @@ impl<'c, S> SendState<'c, S> {
 
 	fn parse(&self, response: Response) -> Response {
 		let parsed = match &self.config.paradigm {
-			ToolCallParadigm::JsonSchema { delims } => {
-				parse(&mut response.content.as_str(), Some(delims))
+			ToolCallParadigm::JsonSchema(delims) => parse(
+				&mut response.content.as_str(),
+				&self.config.delims,
+				Some(delims),
+			),
+			ToolCallParadigm::Pythonic => {
+				parse_py(&mut response.content.as_str(), &self.config.delims)
 			}
-			ToolCallParadigm::Pythonic { reasoning_delims } => {
-				parse_py(&mut response.content.as_str(), reasoning_delims.as_ref())
+			ToolCallParadigm::None => {
+				parse(&mut response.content.as_str(), &self.config.delims, None)
 			}
-			ToolCallParadigm::None => parse(&mut response.content.as_str(), None),
 		}
 		.unwrap_or(Response {
 			reasoning: None,
@@ -425,7 +433,7 @@ impl<'c, S> SendState<'c, S> {
 					"arguments": tool_call.arguments,
 				}))
 				.unwrap_or_default(),
-				ToolCallParadigm::Pythonic { .. } => {
+				ToolCallParadigm::Pythonic => {
 					format_python_call(&tool_call.name, &tool_call.arguments)
 				}
 				ToolCallParadigm::None => "".into(),
@@ -528,27 +536,28 @@ impl<'c, T> ReceivedState<'c, T> {
 #[serde(tag = "paradigm", rename_all = "snake_case")]
 pub enum ToolCallParadigm {
 	/// Standard, JSONschema based tool calling
-	JsonSchema {
-		/// Delimiters for tool calling and reasoning blocks
-		delims: Delims,
-	},
+	JsonSchema(ToolDelims),
 	/// Pythonic tool calling
-	Pythonic {
-		/// Delimiters for reasoning block
-		reasoning_delims: Option<(String, String)>,
-	},
+	Pythonic,
 	/// No tool calling
 	#[default]
 	None,
 }
 
 /// Delimiter configuration for structured message parsing.
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Delims {
+	/// Delimiters for assistant reasoning
+	pub reasoning: (String, String),
+	/// Optional delimiters for assistant answer
+	pub content: Option<(String, String)>,
+}
+
+/// Delimiter configuration for parsing and formatting tool calls.
+#[derive(Default, Deserialize)]
+pub struct ToolDelims {
 	/// Delimiters for available tools section
 	pub available_tools: (String, String),
-	/// Optional delimiters for assistant reasoning
-	pub reasoning: Option<(String, String)>,
 	/// Delimiters for tool call blocks
 	pub tool_call: (String, String),
 	/// Delimiters for tool response blocks
