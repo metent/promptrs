@@ -19,16 +19,16 @@ pub fn parse(
 ) -> ModalResult<Response> {
 	let mut reasoning = None;
 	if let Some(rdelims) = delims.as_ref().map(|del| &del.reasoning) {
-		reasoning = opt(between(&rdelims))
+		reasoning = opt(between(rdelims))
 			.map(|s: Option<&str>| s.map(|s| s.into()))
 			.parse_next(input)?;
 	}
 
 	let content = match delims.as_ref().and_then(|del| del.content.as_ref()) {
-		Some(adelims) => between(&adelims).parse_next(input)?,
+		Some(adelims) => between(adelims).parse_next(input)?,
 		None => match tool_delims {
 			Some(del) => alt((take_until(0.., del.tool_call.0.as_str()), rest))
-				.map(|s: &str| s.into())
+				.map(|s: &str| s)
 				.parse_next(input)?,
 			None => rest.parse_next(input)?,
 		},
@@ -37,7 +37,7 @@ pub fn parse(
 
 	let mut tool_calls = Vec::new();
 	if let Some(delims) = tool_delims.as_ref().map(|del| &del.tool_call) {
-		tool_calls = repeat(0.., between(&delims))
+		tool_calls = repeat(0.., between(delims))
 			.map(parse_json)
 			.parse_next(input)?;
 	}
@@ -87,15 +87,15 @@ enum ToolCallSegment {
 pub fn parse_py(input: &mut &str, delims: &Option<Delims>) -> ModalResult<Response> {
 	let mut reasoning = None;
 	if let Some(rdelims) = delims.as_ref().map(|del| &del.reasoning) {
-		reasoning = opt(between(&rdelims))
+		reasoning = opt(between(rdelims))
 			.map(|s: Option<&str>| s.map(|s| s.into()))
 			.parse_next(input)?;
 	}
 
 	let content = match delims.as_ref().and_then(|del| del.content.as_ref()) {
-		Some(adelims) => between(&adelims).parse_next(input)?,
+		Some(adelims) => between(adelims).parse_next(input)?,
 		None => alt((take_until(0.., "```py"), rest))
-			.map(|s: &str| s.into())
+			.map(|s: &str| s)
 			.parse_next(input)?,
 	}
 	.into();
