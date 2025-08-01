@@ -13,7 +13,7 @@ categories = ["text-processing", "parsing", "development-tools"]
 attohttpc = { version = "0.30.1", default-features = false, features = ["charsets", "json", "single-threaded", "tls-rustls-webpki-roots-ring"] }
 either = "1.15.0"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
+serde_json = { version = "1.0.140", features = ["raw_value"] }
 winnow = "0.7.11"
 wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
 tool-attr-macro = { path = "tool", version = "0.1.0" }

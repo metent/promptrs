@@ -1,3 +1,5 @@
+use crate::client::Function;
+
 use super::Message;
 
 /// Remove oldest messages in order to fit the message history length within
@@ -11,8 +13,8 @@ pub fn prune(messages: Vec<Message>, size: u64) -> Vec<Message> {
 			Message::System(content) => content.len(),
 			Message::User(content) => content.len(),
 			Message::Assistant(content) => content.len(),
-			Message::ToolCall((req, res)) => req.len() + res.len(),
-			Message::Status((req, res)) => req.len() + res.len(),
+			Message::ToolCall((func, res)) => function_len(func) + res.len(),
+			Message::Status((func, res)) => function_len(func) + res.len(),
 		};
 		Some(msg)
 	});
@@ -35,4 +37,11 @@ pub fn prune(messages: Vec<Message>, size: u64) -> Vec<Message> {
 
 fn is_status(msg: &Message) -> bool {
 	matches!(msg, Message::Status(_))
+}
+
+fn function_len(Function { name, arguments }: &Function) -> usize {
+	name.len()
+		+ arguments
+			.iter()
+			.fold(0, |acc, (k, v)| acc + k.len() + v.to_string().len())
 }

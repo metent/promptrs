@@ -1,25 +1,28 @@
 //! Core client implementation for chat completions.
 
+use super::{Tool, ToolCallParadigm, ToolDelims};
 use attohttpc::body::Json;
 use attohttpc::header::CONTENT_TYPE;
 use attohttpc::{Error, ResponseReader, TextReader};
 use either::IntoEither;
 use log::info;
-use serde::ser::SerializeSeq;
+use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize, Serializer};
+use serde_json::value::RawValue;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Lines};
 use std::iter::StepBy;
 use std::time::Duration;
 
 /// Represents a chat completion request configuration.
-pub struct Request<'s> {
+pub struct Request<'s, S> {
 	pub api_key: &'s Option<String>,
 	pub base_url: &'s String,
-	pub body: Params<'s>,
+	pub body: Params<'s, S>,
 }
 
-impl Request<'_> {
+impl<'s, S> Request<'s, S> {
 	/// Sends the chat completion request and processes streaming response.
 	pub fn chat_completion(
 		&self,
@@ -120,16 +123,234 @@ fn next_chunk(mut s: String) -> Result<Option<ChatCompletionChunk>, io::Error> {
 }
 
 /// API request parameters
-#[derive(Serialize)]
-pub struct Params<'s> {
+pub struct Params<'s, S> {
 	pub model: &'s String,
 	pub temperature: Option<f64>,
 	pub top_p: Option<f64>,
-	#[serde(serialize_with = "serialize_messages")]
-	pub messages: &'s [Message],
+	pub inner: InnerParams<'s, S>,
 	pub stream: bool,
-	#[serde(flatten)]
 	pub extra: &'s serde_json::Map<String, serde_json::Value>,
+}
+
+impl<S> Serialize for Params<'_, S> {
+	fn serialize<R: Serializer>(&self, serializer: R) -> Result<R::Ok, R::Error> {
+		let mut map = serializer.serialize_map(None)?;
+		map.serialize_entry("model", self.model)?;
+		map.serialize_entry("temperature", &self.temperature)?;
+		map.serialize_entry("top_p", &self.top_p)?;
+		map.serialize_entry("messages", &self.inner)?;
+		if matches!(self.inner.paradigm, ToolCallParadigm::Server) {
+			map.serialize_entry("tools", self.inner.tools)?;
+		}
+		map.serialize_entry("stream", &self.stream)?;
+		for (key, value) in self.extra.iter() {
+			map.serialize_entry(key, value)?;
+		}
+		map.end()
+	}
+}
+
+pub struct InnerParams<'s, S> {
+	pub messages: &'s [Message],
+	pub paradigm: &'s ToolCallParadigm,
+	pub tools: &'s [Tool<'s, S>],
+}
+
+impl<S> Serialize for InnerParams<'_, S> {
+	fn serialize<R: Serializer>(&self, serializer: R) -> Result<R::Ok, R::Error> {
+		let InnerParams {
+			messages,
+			paradigm,
+			tools,
+		} = self;
+		let mut seq = serializer.serialize_seq(Some(messages.len()))?;
+
+		let mut messages = messages.iter();
+		let mut curr = messages.next();
+
+		loop {
+			while let Some(
+				Message::ToolCall((Function { name, arguments }, tool))
+				| Message::Status((Function { name, arguments }, tool)),
+			) = curr
+			{
+				let pair = match &paradigm {
+					ToolCallParadigm::Server => (
+						"tool_calls",
+						json!([{
+							"function": {
+								"name": name,
+								"arguments": serde_json::to_string(arguments)
+									.unwrap_or_default(),
+							},
+							"id": "0",
+							"type": "function",
+						}]),
+					),
+					ToolCallParadigm::JsonSchema(delims) => {
+						("content", format_jsonschema_call(name, arguments, delims))
+					}
+					ToolCallParadigm::Pythonic => {
+						("content", format_python_call(name, arguments))
+					}
+					ToolCallParadigm::None => ("content", "".into()),
+				};
+				seq.serialize_element(&HashMap::from([("role", "assistant".into()), pair]))?;
+				seq.serialize_element(&HashMap::from([("role", "tool"), ("content", tool)]))?;
+				curr = messages.next();
+			}
+
+			let Some(message) = curr else { break };
+
+			let (role, content) = match message {
+				Message::System(content) => (
+					"system",
+					&construct_system_msg(content, paradigm, tools).unwrap(),
+				),
+				Message::User(content) => {
+					if let Some(Message::Status((_, status))) = curr {
+						let user = &format!("{content}\n\nCurrent Status is\n\n{status}");
+						let map = HashMap::from([("role", "user"), ("content", user)]);
+						seq.serialize_element(&map)?;
+
+						messages.next();
+						curr = messages.next();
+
+						continue;
+					}
+					("user", content)
+				}
+				Message::Assistant(content) => ("assistant", content),
+				_ => unreachable!(),
+			};
+			let map = HashMap::from([("role", role), ("content", content)]);
+			seq.serialize_element(&map)?;
+
+			curr = messages.next();
+		}
+		seq.end()
+	}
+}
+
+fn construct_system_msg<'s, S>(
+	base: &str,
+	paradigm: &ToolCallParadigm,
+	tools: &[Tool<'s, S>],
+) -> Option<String> {
+	match paradigm {
+		ToolCallParadigm::JsonSchema(ToolDelims {
+			available_tools,
+			tool_call,
+			..
+		}) => {
+			let jsonschema = jsonschema(tools);
+			if jsonschema.is_empty() {
+				return Some(base.into());
+			}
+			Some(format!(
+				r#"{base}
+
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within {at_start} and {at_end}:
+{at_start}{jsonschema}{at_end}
+
+For each function call, return a json object with function name and arguments within {tc_start} and {tc_end}:
+{tc_start}{{"name": <function-name>, "arguments": <args-json-object>}}{tc_end}
+"#,
+				at_start = available_tools.0,
+				at_end = available_tools.1,
+				tc_start = tool_call.0,
+				tc_end = tool_call.1,
+			))
+		}
+		ToolCallParadigm::Pythonic => {
+			let pydefs = pydefs(tools);
+			if pydefs.is_empty() {
+				return Some(base.into());
+			}
+			Some(format!(
+				r#"{base}
+
+# Tools
+
+You are provided with the following python APIs to assist with the user query:
+```py
+{pydefs}
+```
+You can invoke any of these tools by writing a python function call inside a python code block.
+"#,
+			))
+		}
+		_ => Some(base.into()),
+	}
+}
+
+fn jsonschema<'s, S>(tools: &[Tool<'s, S>]) -> String {
+	let mut schemas = Vec::new();
+	for tool in tools {
+		schemas.push(format!(
+			r#"{{"name":"{}","arguments":{}}}"#,
+			tool.name, tool.jsonschema
+		));
+	}
+	serde_json::to_string_pretty(&schemas).unwrap_or_else(|err| err.to_string())
+}
+
+fn pydefs<'s, S>(tools: &[Tool<'s, S>]) -> String {
+	tools
+		.iter()
+		.fold("".into(), |acc, tool| acc + tool.pydef + "\n")
+}
+
+fn format_jsonschema_call(
+	name: &str,
+	arguments: &serde_json::Map<String, serde_json::Value>,
+	ToolDelims {
+		tool_call: (start, end),
+		..
+	}: &ToolDelims,
+) -> Value {
+	format!(
+		"{start}{}{end}",
+		serde_json::to_string(&json!({
+			"name": name,
+			"arguments": arguments,
+		}))
+		.unwrap_or_default()
+	)
+	.into()
+}
+
+fn format_python_call(name: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> Value {
+	let mut args = arguments
+		.iter()
+		.map(|(name, value)| format!("{name}={value}, "))
+		.collect::<String>();
+	if args.ends_with(", ") {
+		args.truncate(args.len() - 2);
+	}
+	format!("```py\n{name}({args})\n```").into()
+}
+
+impl<S> Serialize for Tool<'_, S> {
+	fn serialize<R: Serializer>(&self, serializer: R) -> Result<R::Ok, R::Error> {
+		let mut map = serializer.serialize_map(Some(1))?;
+		let parameters =
+			serde_json::from_str::<&RawValue>(self.jsonschema).unwrap_or(RawValue::NULL);
+		map.serialize_entry(
+			"function",
+			&json!({
+				"name": self.name,
+				"description": self.description,
+				"parameters": parameters,
+				"strict": true,
+			}),
+		)?;
+		map.end()
+	}
 }
 
 /// Represents a chat message in conversation history.
@@ -142,58 +363,9 @@ pub enum Message {
 	/// LLM responses without reasoning
 	Assistant(String),
 	/// Tool call identifier, arguments and response
-	ToolCall((String, String)),
+	ToolCall((Function, String)),
 	/// Status tool call identifer and response
-	Status((String, String)),
-}
-
-fn serialize_messages<S: Serializer>(
-	messages: &[Message],
-	serializer: S,
-) -> Result<S::Ok, S::Error> {
-	let mut seq = serializer.serialize_seq(Some(messages.len()))?;
-
-	let mut messages = messages.iter();
-	let mut curr = messages.next();
-
-	loop {
-		while let Some(Message::ToolCall((assistant, tool)) | Message::Status((assistant, tool))) =
-			curr
-		{
-			seq.serialize_element(&HashMap::from([
-				("role", "assistant"),
-				("content", assistant),
-			]))?;
-			seq.serialize_element(&HashMap::from([("role", "tool"), ("content", tool)]))?;
-			curr = messages.next();
-		}
-
-		let Some(message) = curr else { break };
-
-		let (role, content) = match message {
-			Message::System(content) => ("system", content),
-			Message::User(content) => {
-				if let Some(Message::Status((_, status))) = curr {
-					let user = &format!("{content}\n\nCurrent Status is\n\n{status}");
-					let map = HashMap::from([("role", "user"), ("content", user)]);
-					seq.serialize_element(&map)?;
-
-					messages.next();
-					curr = messages.next();
-
-					continue;
-				}
-				("user", content)
-			}
-			Message::Assistant(content) => ("assistant", content),
-			_ => unreachable!(),
-		};
-		let map = HashMap::from([("role", role), ("content", content)]);
-		seq.serialize_element(&map)?;
-
-		curr = messages.next();
-	}
-	seq.end()
+	Status((Function, String)),
 }
 
 /// Response structure containing AI output and tool calls.

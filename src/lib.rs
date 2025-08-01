@@ -86,14 +86,13 @@ mod parser;
 mod pruner;
 
 pub use client::{Arguments, Message};
-use client::{Function, Params, Request, Response};
+use client::{Function, InnerParams, Params, Request, Response};
 use log::debug;
 use parser::{parse, parse_py};
 use pruner::prune;
 pub use serde;
 use serde::Deserialize;
 pub use serde_json;
-use serde_json::json;
 use std::io;
 pub use tool_attr_macro::tool;
 
@@ -199,17 +198,17 @@ impl UserConfig {
 pub struct InitState<'c, 's, S> {
 	config: &'c UserConfig,
 	system: Option<&'s str>,
-	tools: Vec<Box<dyn Tool<State = S>>>,
-	status: Option<Box<dyn Tool<State = S>>>,
+	tools: Vec<Tool<'s, S>>,
+	status: Option<Tool<'s, S>>,
 }
 
-impl<'c, S> InitState<'c, '_, S> {
+impl<'c, 's, S> InitState<'c, 's, S> {
 	/// Starts user message chain
-	pub fn user(self, user: String) -> SendState<'c, S> {
+	pub fn user(self, user: String) -> SendState<'c, 's, S> {
 		let messages = self
-			.system()
+			.system
 			.into_iter()
-			.map(Message::System)
+			.map(|sys| Message::System(sys.into()))
 			.chain([Message::User(user)])
 			.collect();
 		SendState {
@@ -221,88 +220,27 @@ impl<'c, S> InitState<'c, '_, S> {
 	}
 
 	/// Registers a new tool implementation
-	pub fn tool(mut self, tool: impl Tool<State = S> + 'static) -> Self {
-		self.tools.push(Box::new(tool));
+	pub fn tool(mut self, tool: Tool<'s, S>) -> Self {
+		self.tools.push(tool);
 		self
 	}
 
 	/// Sets status monitoring tool
-	pub fn status(mut self, tool: impl Tool<State = S> + 'static) -> Self {
-		self.status = Some(Box::new(tool));
+	pub fn status(mut self, tool: Tool<'s, S>) -> Self {
+		self.status = Some(tool);
 		self
-	}
-
-	/// Generates system message with tool documentation
-	fn system(&self) -> Option<String> {
-		let system_base = self.system?;
-		match &self.config.paradigm {
-			ToolCallParadigm::JsonSchema(ToolDelims {
-				available_tools,
-				tool_call,
-				..
-			}) if !self.tools.is_empty() => Some(format!(
-				r#"{system_base}
-
-# Tools
-
-You may call one or more functions to assist with the user query.
-
-You are provided with function signatures within {at_start} and {at_end}:
-{at_start}{oai_spec}{at_end}
-
-For each function call, return a json object with function name and arguments within {tc_start} and {tc_end}:
-{tc_start}{{"name": <function-name>, "arguments": <args-json-object>}}{tc_end}
-"#,
-				at_start = available_tools.0,
-				at_end = available_tools.1,
-				tc_start = tool_call.0,
-				tc_end = tool_call.1,
-				oai_spec = self.jsonschema()
-			)),
-			ToolCallParadigm::Pythonic if !self.tools.is_empty() => Some(format!(
-				r#"{system_base}
-
-# Tools
-
-You are provided with the following python APIs to assist with the user query:
-```py
-{pydefs}
-```
-You can invoke any of these tools by writing a python function call inside a python code block.
-"#,
-				pydefs = self.pydefs()
-			)),
-			_ => Some(system_base.into()),
-		}
-	}
-
-	fn jsonschema(&self) -> String {
-		let mut schemas = Vec::new();
-		for tool in self.tools.iter() {
-			schemas.push(json!({
-				"name": tool.name(),
-				"arguments": tool.arguments(),
-			}));
-		}
-		serde_json::to_string_pretty(&schemas).unwrap_or_else(|err| err.to_string())
-	}
-
-	fn pydefs(&self) -> String {
-		self.tools
-			.iter()
-			.fold("".into(), |acc, tool| acc + tool.pydef() + "\n")
 	}
 }
 
 /// Active processing state containing message history
-pub struct SendState<'c, S> {
+pub struct SendState<'c, 's, S> {
 	config: &'c UserConfig,
 	messages: Vec<Message>,
-	tools: Vec<Box<dyn Tool<State = S>>>,
-	status: Option<Box<dyn Tool<State = S>>>,
+	tools: Vec<Tool<'s, S>>,
+	status: Option<Tool<'s, S>>,
 }
 
-impl<'c, S> SendState<'c, S> {
+impl<'c, 's, S> SendState<'c, 's, S> {
 	/// Adds additional messages to the history
 	pub fn messages(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
 		self.messages.extend(messages);
@@ -313,7 +251,7 @@ impl<'c, S> SendState<'c, S> {
 	pub fn on_token<F: FnMut(&mut S, String)>(
 		self,
 		on_token: F,
-	) -> SendAndHandleTokenState<'c, S, F> {
+	) -> SendAndHandleTokenState<'c, 's, S, F> {
 		SendAndHandleTokenState {
 			send_state: self,
 			on_token,
@@ -321,7 +259,7 @@ impl<'c, S> SendState<'c, S> {
 	}
 
 	/// Sends chat completion request, and handles parsing and tool call invocations
-	pub fn process(self, state: &mut S) -> Result<ReceivedState<'c, S>, io::Error> {
+	pub fn process(self, state: &mut S) -> Result<ReceivedState<'c, 's, S>, io::Error> {
 		self.process_inner(state, None::<fn(&mut S, String)>)
 	}
 
@@ -333,7 +271,7 @@ impl<'c, S> SendState<'c, S> {
 		mut self,
 		state: &mut S,
 		mut on_token: Option<impl FnMut(&mut S, String)>,
-	) -> Result<ReceivedState<'c, S>, io::Error> {
+	) -> Result<ReceivedState<'c, 's, S>, io::Error> {
 		self.push_initial_status(state);
 
 		debug!("Messages: {:#?}", self.messages);
@@ -374,7 +312,11 @@ impl<'c, S> SendState<'c, S> {
 				model: &self.config.model,
 				temperature: self.config.temperature,
 				top_p: self.config.top_p,
-				messages: &self.messages,
+				inner: InnerParams {
+					messages: &self.messages,
+					paradigm: &self.config.paradigm,
+					tools: &self.tools,
+				},
 				stream: true,
 				extra: &self.config.extra,
 			},
@@ -384,6 +326,9 @@ impl<'c, S> SendState<'c, S> {
 
 	fn parse(&self, response: Response) -> Response {
 		let parsed = match &self.config.paradigm {
+			ToolCallParadigm::Server => {
+				parse(&mut response.content.as_str(), &self.config.delims, None)
+			}
 			ToolCallParadigm::JsonSchema(delims) => parse(
 				&mut response.content.as_str(),
 				&self.config.delims,
@@ -424,32 +369,24 @@ impl<'c, S> SendState<'c, S> {
 
 	fn execute_tools(&mut self, state: &mut S, tool_calls: Vec<Function>) -> bool {
 		let mut called = false;
-		for mut tool_call in tool_calls {
-			if self
-				.status
-				.as_ref()
-				.is_some_and(|s| s.name() == tool_call.name)
-			{
+		for Function {
+			name,
+			mut arguments,
+		} in tool_calls
+		{
+			if self.status.as_ref().is_some_and(|s| s.name == name) {
 				continue;
 			}
 			let resp = self
 				.tools
 				.iter()
-				.find(|tool| tool.name() == tool_call.name)
-				.map(|tool| tool.call(state, &mut tool_call.arguments))
+				.find(|tool| tool.name == name)
+				.map(|tool| (tool.call)(state, &mut arguments))
 				.unwrap_or_else(|| Ok("Function not found.".into()))
 				.unwrap_or_else(|err| err.to_string());
-			let tc = match &self.config.paradigm {
-				ToolCallParadigm::JsonSchema(delims) => {
-					format_jsonschema_call(&tool_call.name, &tool_call.arguments, delims)
-				}
-				ToolCallParadigm::Pythonic => {
-					format_python_call(&tool_call.name, &tool_call.arguments)
-				}
-				ToolCallParadigm::None => "".into(),
-			};
 
-			self.messages.push(Message::ToolCall((tc, resp)));
+			self.messages
+				.push(Message::ToolCall((Function { name, arguments }, resp)));
 			called = true;
 		}
 		called
@@ -471,33 +408,44 @@ impl<'c, S> SendState<'c, S> {
 			return;
 		};
 
-		let status = status_fn
-			.call(state, &mut serde_json::Map::new())
+		let status = (status_fn.call)(state, &mut serde_json::Map::new())
 			.unwrap_or("Unexpected error while serializing status!".into());
 
-		self.messages
-			.insert(i + 1, Message::Status((status_fn.name().into(), status)));
+		self.messages.insert(
+			i + 1,
+			Message::Status((
+				Function {
+					name: status_fn.name.into(),
+					arguments: Arguments::new(),
+				},
+				status,
+			)),
+		);
 	}
 
 	fn push_status(&mut self, state: &mut S) {
 		let Some(status_fn) = &self.status else {
 			return;
 		};
-		let status = status_fn
-			.call(state, &mut serde_json::Map::new())
+		let status = (status_fn.call)(state, &mut serde_json::Map::new())
 			.unwrap_or("Unexpected error while serializing status!".into());
-		self.messages
-			.push(Message::Status((status_fn.name().into(), status)));
+		self.messages.push(Message::Status((
+			Function {
+				name: status_fn.name.into(),
+				arguments: Arguments::new(),
+			},
+			status,
+		)));
 	}
 }
 
 /// Processing state with token handling callback
-pub struct SendAndHandleTokenState<'c, S, F: FnMut(&mut S, String)> {
-	send_state: SendState<'c, S>,
+pub struct SendAndHandleTokenState<'c, 's, S, F: FnMut(&mut S, String)> {
+	send_state: SendState<'c, 's, S>,
 	on_token: F,
 }
 
-impl<'c, S, F: FnMut(&mut S, String)> SendAndHandleTokenState<'c, S, F> {
+impl<'c, 's, S, F: FnMut(&mut S, String)> SendAndHandleTokenState<'c, 's, S, F> {
 	/// Adds additional messages to the history
 	pub fn messages(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
 		self.send_state.messages.extend(messages);
@@ -505,25 +453,25 @@ impl<'c, S, F: FnMut(&mut S, String)> SendAndHandleTokenState<'c, S, F> {
 	}
 
 	/// Starts processing with token callback
-	pub fn process(self, state: &mut S) -> Result<ReceivedState<'c, S>, io::Error> {
+	pub fn process(self, state: &mut S) -> Result<ReceivedState<'c, 's, S>, io::Error> {
 		self.send_state.process_inner(state, Some(self.on_token))
 	}
 }
 
 /// Result state after processing
-pub struct ReceivedState<'c, S> {
+pub struct ReceivedState<'c, 's, S> {
 	config: &'c UserConfig,
 	messages: Vec<Message>,
-	tools: Vec<Box<dyn Tool<State = S>>>,
+	tools: Vec<Tool<'s, S>>,
 	nbtc: usize,
-	status: Option<Box<dyn Tool<State = S>>>,
+	status: Option<Tool<'s, S>>,
 	/// Assistant response with reasoning block removed
 	pub text: String,
 }
 
-impl<'c, T> ReceivedState<'c, T> {
+impl<'c, 's, T> ReceivedState<'c, 's, T> {
 	/// Continues conversation with new user input
-	pub fn user(mut self, user: String) -> SendState<'c, T> {
+	pub fn user(mut self, user: String) -> SendState<'c, 's, T> {
 		self.messages.push(Message::User(user));
 		self.messages = prune(self.messages, self.config.char_limit);
 		SendState {
@@ -544,6 +492,8 @@ impl<'c, T> ReceivedState<'c, T> {
 #[derive(Default, Deserialize)]
 #[serde(tag = "paradigm", rename_all = "snake_case")]
 pub enum ToolCallParadigm {
+	/// Rely on server for tool call parsing and formatting
+	Server,
 	/// Standard, JSONschema based tool calling
 	JsonSchema(ToolDelims),
 	/// Pythonic tool calling
@@ -573,56 +523,17 @@ pub struct ToolDelims {
 	pub tool_response: (String, String),
 }
 
-/// Interface for tool implementations.
-pub trait Tool {
-	/// Agent State
-	type State;
-
-	/// Retrieves tool name
-	fn name(&self) -> &str;
-
-	/// Retrieves argument schema description
-	fn arguments(&self) -> &str;
-
-	/// Retrieves function interface for pythonic tool calling
-	fn pydef(&self) -> &str;
-
-	/// Executes the tool function with given JSON arguments
-	fn call(
-		&self,
-		state: &mut Self::State,
-		arguments: &mut Arguments,
-	) -> serde_json::Result<String>;
-}
-
-fn format_jsonschema_call(
-	name: &str,
-	arguments: &serde_json::Map<String, serde_json::Value>,
-	ToolDelims {
-		tool_call: (start, end),
-		..
-	}: &ToolDelims,
-) -> String {
-	format!(
-		"{start}{}{end}",
-		serde_json::to_string(&json!({
-			"name": name,
-			"arguments": arguments,
-		}))
-		.unwrap_or_default()
-	)
-}
-
-fn format_python_call(
-	name: &str,
-	arguments: &serde_json::Map<String, serde_json::Value>,
-) -> String {
-	let mut args = arguments
-		.iter()
-		.map(|(name, value)| format!("{name}={value}, "))
-		.collect::<String>();
-	if args.ends_with(", ") {
-		args.truncate(args.len() - 2);
-	}
-	format!("```py\n{name}({args})\n```")
+/// Tool metadata
+#[derive(Clone, Copy)]
+pub struct Tool<'s, S> {
+	/// Tool name
+	pub name: &'s str,
+	/// Tool description
+	pub description: &'s str,
+	/// Tool parameters in JSON schema format
+	pub jsonschema: &'s str,
+	/// Tool python function definition
+	pub pydef: &'s str,
+	/// Pointer to tool implementation
+	pub call: fn(state: &mut S, arguments: &mut Arguments) -> serde_json::Result<String>,
 }

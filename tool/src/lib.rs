@@ -111,7 +111,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 			if let syn::Type::Reference(syn::TypeReference { elem, .. }) = &**ty {
 				let ident = syn::Ident::new("state", Span::call_site());
 				state_arg = quote!(#ident : #ty,);
-				state_ty = quote!(type State = #elem;);
+				state_ty = quote!(#elem);
 				args.push(ident);
 				continue;
 			}
@@ -166,9 +166,8 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 			}
 		}
 	}
-	let arguments = format!(
-		r#"{{ "description": "{}", "properties": {{ {} }}, "required": ["{}"] }}"#,
-		description,
+	let jsonschema = format!(
+		r#"{{ "properties": {{ {} }}, "required": ["{}"] }}"#,
 		params.join(", "),
 		required_params.join(r#"", ""#)
 	);
@@ -186,38 +185,28 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 		..
 	} = input;
 	let name = ident.to_string();
+	let call = syn::Ident::new(&format!("_{name}"), Span::call_site());
+	let fun = syn::Ident::new(&format!("__{name}"), Span::call_site());
 	let pydef = format!("{}def {}({})", pycomments, name, pyparams.join(", "));
 	let output = quote! {
-		#[allow(non_camel_case_types)]
-		struct #ident;
+		#[allow(non_upper_case_globals)]
+		const #ident: ::promptrs::Tool<'static, #state_ty> = ::promptrs::Tool {
+			name: #name,
+			description: #description,
+			jsonschema: #jsonschema,
+			pydef: #pydef,
+			call: #call,
+		};
 
-		impl #ident {
-			#vis fn run #generics (#inputs) #output {
-				#block
-			}
+		fn #call(#state_arg arguments: &mut ::promptrs::Arguments) -> ::promptrs::serde_json::Result<String> {
+			let mut left = arguments.clone();
+			#(#call_stmts)*
+			let result = #fun(#(#args,)*);
+			Ok(::std::string::ToString::to_string(&result))
 		}
 
-		impl ::promptrs::Tool for #ident {
-			#state_ty
-
-			fn name(&self) -> &str {
-				#name
-			}
-
-			fn arguments(&self) -> &str {
-				#arguments
-			}
-
-			fn pydef(&self) -> &str {
-				#pydef
-			}
-
-			fn call(&self, #state_arg arguments: &mut ::promptrs::Arguments) -> ::promptrs::serde_json::Result<String> {
-				let mut left = arguments.clone();
-				#(#call_stmts)*
-				let result = #ident::run(#(#args,)*);
-				Ok(::std::string::ToString::to_string(&result))
-			}
+		#vis fn #fun #generics (#inputs) #output {
+			#block
 		}
 	};
 
