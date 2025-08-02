@@ -190,9 +190,7 @@ impl<S> Serialize for InnerParams<'_, S> {
 					ToolCallParadigm::JsonSchema(delims) => {
 						("content", format_jsonschema_call(name, arguments, delims))
 					}
-					ToolCallParadigm::Pythonic => {
-						("content", format_python_call(name, arguments))
-					}
+					ToolCallParadigm::Pythonic => ("content", format_python_call(name, arguments)),
 					ToolCallParadigm::None => ("content", "".into()),
 				};
 				seq.serialize_element(&HashMap::from([("role", "assistant".into()), pair]))?;
@@ -340,6 +338,7 @@ impl<S> Serialize for Tool<'_, S> {
 		let mut map = serializer.serialize_map(Some(1))?;
 		let parameters =
 			serde_json::from_str::<&RawValue>(self.jsonschema).unwrap_or(RawValue::NULL);
+		map.serialize_entry("type", "function")?;
 		map.serialize_entry(
 			"function",
 			&json!({

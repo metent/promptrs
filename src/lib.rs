@@ -85,8 +85,8 @@ mod client;
 mod parser;
 mod pruner;
 
-pub use client::{Arguments, Message};
-use client::{Function, InnerParams, Params, Request, Response};
+pub use client::{Arguments, Function, Message};
+use client::{InnerParams, Params, Request, Response};
 use log::debug;
 use parser::{parse, parse_py};
 use pruner::prune;
@@ -184,7 +184,7 @@ impl UserConfigBuilder {
 
 impl UserConfig {
 	/// Initializes workflow configuration with system message
-	pub fn system<'c, 's, S>(&'c self, system: Option<&'s str>) -> InitState<'c, 's, S> {
+	pub fn system<S>(&self, system: Option<String>) -> InitState<'_, '_, S> {
 		InitState {
 			config: self,
 			system,
@@ -197,7 +197,7 @@ impl UserConfig {
 /// Initial agent state containing system configuration
 pub struct InitState<'c, 's, S> {
 	config: &'c UserConfig,
-	system: Option<&'s str>,
+	system: Option<String>,
 	tools: Vec<Tool<'s, S>>,
 	status: Option<Tool<'s, S>>,
 }
@@ -208,7 +208,7 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 		let messages = self
 			.system
 			.into_iter()
-			.map(|sys| Message::System(sys.into()))
+			.map(|sys| Message::System(sys))
 			.chain([Message::User(user)])
 			.collect();
 		SendState {
