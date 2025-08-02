@@ -3,7 +3,7 @@
 use super::{Tool, ToolCallParadigm, ToolDelims};
 use attohttpc::body::Json;
 use attohttpc::header::CONTENT_TYPE;
-use attohttpc::{Error, ResponseReader, TextReader};
+use attohttpc::{Error, TextReader};
 use either::IntoEither;
 use log::info;
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -11,8 +11,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::io::{self, BufRead, BufReader, Lines};
-use std::iter::StepBy;
+use std::io::{self, BufRead, BufReader};
 use std::time::Duration;
 
 /// Represents a chat completion request configuration.
@@ -73,7 +72,9 @@ impl<'s, S> Request<'s, S> {
 		})
 	}
 
-	fn stream(&self) -> Result<ChatCompletionStream, Error> {
+	fn stream(
+		&self,
+	) -> Result<ChatCompletionStream<impl Iterator<Item = io::Result<String>>>, Error> {
 		let (status, _, reader) =
 			attohttpc::post(self.base_url.to_string() + "/v1/chat/completions")
 				.read_timeout(Duration::MAX)
@@ -99,10 +100,10 @@ impl<'s, S> Request<'s, S> {
 	}
 }
 
-pub struct ChatCompletionStream(StepBy<Lines<BufReader<TextReader<ResponseReader>>>>);
+pub struct ChatCompletionStream<T: Iterator<Item = io::Result<String>>>(T);
 
-impl Iterator for ChatCompletionStream {
-	type Item = Result<ChatCompletionChunk, io::Error>;
+impl<T: Iterator<Item = io::Result<String>>> Iterator for ChatCompletionStream<T> {
+	type Item = io::Result<ChatCompletionChunk>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0
@@ -111,7 +112,7 @@ impl Iterator for ChatCompletionStream {
 	}
 }
 
-fn next_chunk(mut s: String) -> Result<Option<ChatCompletionChunk>, io::Error> {
+fn next_chunk(mut s: String) -> io::Result<Option<ChatCompletionChunk>> {
 	if s.contains("[DONE]") {
 		return Ok(None);
 	}
