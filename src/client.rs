@@ -7,7 +7,7 @@ use attohttpc::{Error, TextReader};
 use either::IntoEither;
 use log::info;
 use serde::ser::{SerializeMap, SerializeSeq};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -408,7 +408,18 @@ pub struct Function {
 	/// Name of the tool function to invoke
 	pub name: String,
 	/// Arguments for the tool in JSON format
+	#[serde(deserialize_with = "deserialize_arguments")]
 	pub arguments: Arguments,
+}
+
+fn deserialize_arguments<'de, D: Deserializer<'de>>(
+	deserializer: D,
+) -> Result<Arguments, D::Error> {
+	let s = String::deserialize(deserializer)?;
+	if s.is_empty() {
+		return Ok(Arguments::new());
+	}
+	serde_json::from_str(&s).map_err(de::Error::custom)
 }
 
 /// Tool call arguments
