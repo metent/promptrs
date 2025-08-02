@@ -8,25 +8,17 @@ use syn::parse_macro_input;
 
 /// # `#[tool]` Attribute Macro
 ///
-/// Generates a `Tool` implementation for annotated functions:
-///
-/// 1. Creates struct wrapper with function
-/// 2. Implements `Tool` trait with:
-///    - `name()`: Function name
-///    - `arguments()`: JSON schema from doc comments
-///    - `call()`: Type-safe argument parsing
+/// Generates tool metadata for annotated functions.
 ///
 /// ## Example
 ///
 /// ```rust
-/// use promptrs::{tool, Tooling};
-///
 /// #[tool]
 /// /// Calculator tool
 /// /// a: First number
 /// /// b: Second number
 /// /// operation: +, -, *, /
-/// fn calculate(a: f64, b: f64, operation: String) -> String {
+/// fn calculate(_state: &mut (), a: f64, b: f64, operation: String) -> String {
 ///     match operation.as_str() {
 ///         "+" => (a + b).to_string(),
 ///         "-" => (a - b).to_string(),
@@ -35,24 +27,11 @@ use syn::parse_macro_input;
 ///         _ => "Invalid operation".into(),
 ///     }
 /// }
-///
-/// let tooling = Tooling::new().add(calculate);
-/// let args = Arguments::from_value(json!({
-///     "a": 5.5,
-///     "b": 2.5,
-///     "operation": "*"
-/// }));
-///
-/// let result = tooling.call("calculate", &args).unwrap();
-/// println!("Result: {}", result); // 13.75
 /// ```
 ///
 /// ## Documentation Comments
 ///
-/// Use `/// name: Description` to:
-/// 1. Create parameter documentation in JSON schema
-/// 2. Provide user-facing parameter descriptions
-/// 3. Enable parameter auto-completion in development tools
+/// Use `/// name: Description` to generate documentation for each parameter.
 #[proc_macro_attribute]
 pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(item as syn::ItemFn);
@@ -198,7 +177,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 			call: #call,
 		};
 
-		fn #call(#state_arg arguments: &mut ::promptrs::Arguments) -> ::promptrs::serde_json::Result<String> {
+		fn #call(#state_arg _name: &str, arguments: &mut ::promptrs::Arguments) -> ::promptrs::serde_json::Result<String> {
 			let mut left = arguments.clone();
 			#(#call_stmts)*
 			let result = #fun(#(#args,)*);

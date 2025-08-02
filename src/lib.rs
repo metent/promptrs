@@ -381,7 +381,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 				.tools
 				.iter()
 				.find(|tool| tool.name == name)
-				.map(|tool| (tool.call)(state, &mut arguments))
+				.map(|tool| (tool.call)(state, tool.name, &mut arguments))
 				.unwrap_or_else(|| Ok("Function not found.".into()))
 				.unwrap_or_else(|err| err.to_string());
 
@@ -408,7 +408,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 			return;
 		};
 
-		let status = (status_fn.call)(state, &mut serde_json::Map::new())
+		let status = (status_fn.call)(state, status_fn.name, &mut serde_json::Map::new())
 			.unwrap_or("Unexpected error while serializing status!".into());
 
 		self.messages.insert(
@@ -427,7 +427,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		let Some(status_fn) = &self.status else {
 			return;
 		};
-		let status = (status_fn.call)(state, &mut serde_json::Map::new())
+		let status = (status_fn.call)(state, status_fn.name, &mut serde_json::Map::new())
 			.unwrap_or("Unexpected error while serializing status!".into());
 		self.messages.push(Message::Status((
 			Function {
@@ -535,5 +535,6 @@ pub struct Tool<'s, S> {
 	/// Tool python function definition
 	pub pydef: &'s str,
 	/// Pointer to tool implementation
-	pub call: fn(state: &mut S, arguments: &mut Arguments) -> serde_json::Result<String>,
+	pub call:
+		fn(state: &mut S, name: &str, arguments: &mut Arguments) -> serde_json::Result<String>,
 }
