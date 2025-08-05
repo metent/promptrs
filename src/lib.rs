@@ -114,6 +114,8 @@ pub struct UserConfig {
 	/// Tool calling configuration paradigm
 	#[serde(flatten)]
 	pub paradigm: ToolCallParadigm,
+	/// System prompt mode
+	pub mode: SystemPromptMode,
 	/// Maximum allowed message history length in bytes
 	pub char_limit: u64,
 	/// Additional chat completion request parameters
@@ -208,7 +210,7 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 		let messages = self
 			.system
 			.into_iter()
-			.map(|sys| Message::System(sys))
+			.map(Message::System)
 			.chain([Message::User(user)])
 			.collect();
 		SendState {
@@ -316,6 +318,8 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 					messages: &self.messages,
 					paradigm: &self.config.paradigm,
 					tools: &self.tools,
+					status: &self.status,
+					mode: self.config.mode,
 				},
 				stream: true,
 				extra: &self.config.extra,
@@ -501,6 +505,17 @@ pub enum ToolCallParadigm {
 	/// No tool calling
 	#[default]
 	None,
+}
+
+/// System prompt mode
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemPromptMode {
+	/// Send system prompt in system message
+	#[default]
+	System,
+	/// Send system prompt inside user message
+	User,
 }
 
 /// Delimiter configuration for structured message parsing.

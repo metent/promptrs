@@ -1,6 +1,6 @@
 //! Core client implementation for chat completions.
 
-use super::{Tool, ToolCallParadigm, ToolDelims};
+use super::{SystemPromptMode, Tool, ToolCallParadigm, ToolDelims};
 use attohttpc::body::Json;
 use attohttpc::header::CONTENT_TYPE;
 use attohttpc::{Error, TextReader};
@@ -155,6 +155,8 @@ pub struct InnerParams<'s, S> {
 	pub messages: &'s [Message],
 	pub paradigm: &'s ToolCallParadigm,
 	pub tools: &'s [Tool<'s, S>],
+	pub status: &'s Option<Tool<'s, S>>,
+	pub mode: SystemPromptMode,
 }
 
 impl<S> Serialize for InnerParams<'_, S> {
@@ -163,6 +165,8 @@ impl<S> Serialize for InnerParams<'_, S> {
 			messages,
 			paradigm,
 			tools,
+			status,
+			mode,
 		} = self;
 		let mut seq = serializer.serialize_seq(Some(messages.len()))?;
 
@@ -201,24 +205,19 @@ impl<S> Serialize for InnerParams<'_, S> {
 
 			let Some(message) = curr else { break };
 
+			let prompt;
 			let (role, content) = match message {
-				Message::System(content) => (
-					"system",
-					&construct_system_msg(content, paradigm, tools).unwrap(),
-				),
-				Message::User(content) => {
-					if let Some(Message::Status((_, status))) = curr {
-						let user = &format!("{content}\n\nCurrent Status is\n\n{status}");
-						let map = HashMap::from([("role", "user"), ("content", user)]);
-						seq.serialize_element(&map)?;
-
-						messages.next();
-						curr = messages.next();
-
-						continue;
+				Message::System(content) => {
+					prompt = construct_system_msg(content, paradigm, tools, status);
+					curr = messages.next();
+					match curr {
+						Some(Message::User(user)) if matches!(mode, SystemPromptMode::User) => {
+							("user", &format!("{prompt}\n\n{user}"))
+						}
+						_ => ("system", &prompt),
 					}
-					("user", content)
 				}
+				Message::User(content) => ("user", content),
 				Message::Assistant(content) => ("assistant", content),
 				_ => unreachable!(),
 			};
@@ -235,18 +234,19 @@ fn construct_system_msg<'s, S>(
 	base: &str,
 	paradigm: &ToolCallParadigm,
 	tools: &[Tool<'s, S>],
-) -> Option<String> {
+	status: &Option<Tool<'s, S>>,
+) -> String {
 	match paradigm {
 		ToolCallParadigm::JsonSchema(ToolDelims {
 			available_tools,
 			tool_call,
 			..
 		}) => {
-			let jsonschema = jsonschema(tools);
+			let jsonschema = jsonschema(tools, status);
 			if jsonschema.is_empty() {
-				return Some(base.into());
+				return base.into();
 			}
-			Some(format!(
+			format!(
 				r#"{base}
 
 # Tools
@@ -263,14 +263,14 @@ For each function call, return a json object with function name and arguments wi
 				at_end = available_tools.1,
 				tc_start = tool_call.0,
 				tc_end = tool_call.1,
-			))
+			)
 		}
 		ToolCallParadigm::Pythonic => {
-			let pydefs = pydefs(tools);
+			let pydefs = pydefs(tools, status);
 			if pydefs.is_empty() {
-				return Some(base.into());
+				return base.into();
 			}
-			Some(format!(
+			format!(
 				r#"{base}
 
 # Tools
@@ -281,15 +281,15 @@ You are provided with the following python APIs to assist with the user query:
 ```
 You can invoke any of these tools by writing a python function call inside a python code block.
 "#,
-			))
+			)
 		}
-		_ => Some(base.into()),
+		_ => base.into(),
 	}
 }
 
-fn jsonschema<'s, S>(tools: &[Tool<'s, S>]) -> String {
+fn jsonschema<'s, S>(tools: &[Tool<'s, S>], status: &Option<Tool<'s, S>>) -> String {
 	let mut schemas = Vec::new();
-	for tool in tools {
+	for tool in tools.iter().chain(status.iter()) {
 		schemas.push(format!(
 			r#"{{"name":"{}","arguments":{}}}"#,
 			tool.name, tool.jsonschema
@@ -298,9 +298,10 @@ fn jsonschema<'s, S>(tools: &[Tool<'s, S>]) -> String {
 	serde_json::to_string_pretty(&schemas).unwrap_or_else(|err| err.to_string())
 }
 
-fn pydefs<'s, S>(tools: &[Tool<'s, S>]) -> String {
+fn pydefs<'s, S>(tools: &[Tool<'s, S>], status: &Option<Tool<'s, S>>) -> String {
 	tools
 		.iter()
+		.chain(status.iter())
 		.fold("".into(), |acc, tool| acc + tool.pydef + "\n")
 }
 
