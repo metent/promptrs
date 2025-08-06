@@ -86,7 +86,7 @@ mod parser;
 mod pruner;
 
 pub use client::{Arguments, Function, Message};
-use client::{InnerParams, Params, Request, Response};
+use client::{InnerParams, Params, Request, Response, Segment};
 use log::debug;
 use parser::{parse, parse_py};
 use pruner::prune;
@@ -283,14 +283,27 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 				.as_mut()
 				.map(|handler| |token| handler(state, token)),
 		)?;
-		let response = self.parse(completion);
+		let segments = self.parse(completion);
+		let assistant = segments.iter().fold("".to_string(), |acc, seg| match seg {
+			Segment::Answer(s) | Segment::Commentary(s) => acc + s.as_str() + "\n",
+			Segment::CodeBlock(lang, s) => {
+				acc + "```" + lang.as_ref().map_or("", |s| s.as_str()) + "\n" + s + "\n```\n"
+			}
+			_ => acc,
+		});
 
-		if !response.content.is_empty() {
-			self.messages
-				.push(Message::Assistant(response.content.clone()));
+		if !assistant.is_empty() {
+			self.messages.push(Message::Assistant(assistant.clone()));
 		}
 		let old_len = self.messages.len();
-		let called = self.execute_tools(state, response.tool_calls);
+		let tool_calls = segments
+			.into_iter()
+			.flat_map(|seg| match seg {
+				Segment::ToolCall(tc) => tc,
+				_ => vec![],
+			})
+			.collect();
+		let called = self.execute_tools(state, tool_calls);
 		if called {
 			self.push_status(state);
 		}
@@ -302,7 +315,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 			tools: self.tools,
 			nbtc,
 			status: self.status,
-			text: response.content,
+			text: assistant,
 		})
 	}
 
@@ -328,47 +341,29 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		.chat_completion(on_token)?)
 	}
 
-	fn parse(&self, response: Response) -> Response {
+	fn parse(&self, response: Response) -> Vec<Segment> {
 		let parsed = match &self.config.paradigm {
-			ToolCallParadigm::Server => {
-				parse(&mut response.content.as_str(), &self.config.delims, None)
-			}
+			ToolCallParadigm::Server => parse(
+				&mut response.content.as_str(),
+				self.config.delims.as_ref(),
+				None,
+			),
 			ToolCallParadigm::JsonSchema(delims) => parse(
 				&mut response.content.as_str(),
-				&self.config.delims,
+				self.config.delims.as_ref(),
 				Some(delims),
 			),
 			ToolCallParadigm::Pythonic => {
-				parse_py(&mut response.content.as_str(), &self.config.delims)
+				parse_py(&mut response.content.as_str(), self.config.delims.as_ref())
 			}
-			ToolCallParadigm::None => {
-				parse(&mut response.content.as_str(), &self.config.delims, None)
-			}
+			ToolCallParadigm::None => parse(
+				&mut response.content.as_str(),
+				self.config.delims.as_ref(),
+				None,
+			),
 		}
-		.unwrap_or(Response {
-			reasoning: None,
-			content: response.content,
-			tool_calls: vec![],
-		});
-
-		let mut tool_calls = response.tool_calls;
-		if tool_calls.is_empty() {
-			tool_calls = parsed
-				.tool_calls
-				.into_iter()
-				.map(|tc| Function {
-					name: tc.name,
-					arguments: tc.arguments,
-				})
-				.collect();
-		}
-
-		let text = parsed.content.trim();
-		Response {
-			reasoning: parsed.reasoning,
-			content: text.into(),
-			tool_calls,
-		}
+		.unwrap_or(vec![Segment::Commentary(response.content)]);
+		parsed
 	}
 
 	fn execute_tools(&mut self, state: &mut S, tool_calls: Vec<Function>) -> bool {

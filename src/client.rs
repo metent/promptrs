@@ -381,6 +381,20 @@ pub struct Response {
 	pub tool_calls: Vec<Function>,
 }
 
+/// Response segment
+pub enum Segment {
+	/// Assistant reasoning about response generation
+	Reasoning(String),
+	/// Answer content
+	Answer(String),
+	/// Requested Tool Call
+	ToolCall(Vec<Function>),
+	/// Code block with optional language specifier
+	CodeBlock(Option<String>, String),
+	/// Any other response text
+	Commentary(String),
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ChatCompletionChunk {
 	choices: Vec<Choice>,

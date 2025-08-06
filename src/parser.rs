@@ -1,6 +1,5 @@
 use super::client::Function;
-use super::{Delims, Response, ToolDelims};
-use serde::Deserialize;
+use super::{Delims, Segment, ToolDelims};
 use std::str::FromStr;
 use winnow::ascii::{multispace0, multispace1};
 use winnow::combinator::{
@@ -14,39 +13,51 @@ use winnow::{ModalResult, Parser, Result};
 /// Parse assistant response containing JSONschema-based tool calls into structured components
 pub fn parse(
 	input: &mut &str,
-	delims: &Option<Delims>,
+	delims: Option<&Delims>,
 	tool_delims: Option<&ToolDelims>,
-) -> ModalResult<Response> {
-	let mut reasoning = None;
+) -> ModalResult<Vec<Segment>> {
+	let mut segments = Vec::new();
 	if let Some(rdelims) = delims.as_ref().map(|del| &del.reasoning) {
-		reasoning = opt(between(rdelims))
-			.map(|s: Option<&str>| s.map(|s| s.into()))
+		let reasoning = opt(between(rdelims))
+			.map(|s: Option<&str>| s.map(|s| Segment::Reasoning(s.into())))
 			.parse_next(input)?;
+		segments.extend(reasoning.into_iter());
 	}
 
-	let content = match delims.as_ref().and_then(|del| del.content.as_ref()) {
-		Some(adelims) => between(adelims).parse_next(input)?,
-		None => match tool_delims {
-			Some(del) => alt((take_until(0.., del.tool_call.0.as_str()), rest))
-				.map(|s: &str| s)
-				.parse_next(input)?,
-			None => rest.parse_next(input)?,
-		},
-	}
-	.into();
+	let adelims = delims.as_ref().and_then(|del| del.content.as_ref());
+	let tdelims = tool_delims.as_ref().map(|del| &del.tool_call);
 
-	let mut tool_calls = Vec::new();
-	if let Some(delims) = tool_delims.as_ref().map(|del| &del.tool_call) {
-		tool_calls = repeat(0.., between(delims))
-			.map(parse_json)
-			.parse_next(input)?;
+	match (adelims, tdelims) {
+		(Some(adel), Some(tdel)) => repeat(
+			0..,
+			alt((
+				between(&adel).map(|ans| Segment::Answer(ans.into())),
+				between(&tdel).map(|tc| Segment::ToolCall(parse_json(tc))),
+			)),
+		)
+		.parse_next(input)?,
+		(Some(adel), None) => repeat(
+			0..,
+			alt((
+				between(&adel).map(|ans| Segment::Answer(ans.into())),
+				take_until(0.., adel.0.as_str()).map(|cmt: &str| Segment::Commentary(cmt.into())),
+			)),
+		)
+		.parse_next(input)?,
+		(None, Some(tdel)) => repeat(
+			0..,
+			alt((
+				between(&tdel).map(|tc| Segment::ToolCall(parse_json(tc))),
+				take_until(0.., tdel.0.as_str()).map(|cmt: &str| Segment::Commentary(cmt.into())),
+			)),
+		)
+		.parse_next(input)?,
+		(None, None) => {
+			repeat(0.., rest.map(|ans: &str| Segment::Commentary(ans.into()))).parse_next(input)?
+		}
 	}
 
-	Ok(Response {
-		reasoning,
-		content,
-		tool_calls,
-	})
+	Ok(segments)
 }
 
 fn between<'s, E: ParserError<&'s str>>(
@@ -62,46 +73,56 @@ fn between<'s, E: ParserError<&'s str>>(
 	}
 }
 
-fn parse_json(list: Vec<&str>) -> Vec<Function> {
-	list.into_iter()
-		.flat_map(|tc| {
-			match serde_json::from_str(tc).unwrap_or(ToolCallSegment::One(Function {
-				name: "".into(),
-				arguments: serde_json::Map::new(),
-			})) {
-				ToolCallSegment::One(def) => vec![def],
-				ToolCallSegment::Many(defs) => defs,
-			}
-		})
-		.collect()
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ToolCallSegment {
-	One(Function),
-	Many(Vec<Function>),
+fn parse_json(json: &str) -> Vec<Function> {
+	if let Ok(tc) = serde_json::from_str(json) {
+		tc
+	} else if let Ok(tc) = serde_json::from_str(json) {
+		vec![tc]
+	} else {
+		vec![Function {
+			name: "".into(),
+			arguments: serde_json::Map::new(),
+		}]
+	}
 }
 
 /// Parse assistant response containing pythonic tool calls into structured components
-pub fn parse_py(input: &mut &str, delims: &Option<Delims>) -> ModalResult<Response> {
-	let mut reasoning = None;
+pub fn parse_py(input: &mut &str, delims: Option<&Delims>) -> ModalResult<Vec<Segment>> {
+	let mut segments = Vec::new();
 	if let Some(rdelims) = delims.as_ref().map(|del| &del.reasoning) {
-		reasoning = opt(between(rdelims))
-			.map(|s: Option<&str>| s.map(|s| s.into()))
+		let reasoning = opt(between(rdelims))
+			.map(|s: Option<&str>| s.map(|s| Segment::Reasoning(s.into())))
 			.parse_next(input)?;
+		segments.extend(reasoning.into_iter());
 	}
 
-	let content = match delims.as_ref().and_then(|del| del.content.as_ref()) {
-		Some(adelims) => between(adelims).parse_next(input)?,
-		None => alt((take_until(0.., "```py"), rest))
-			.map(|s: &str| s)
-			.parse_next(input)?,
-	}
-	.into();
+	let adelims = delims.as_ref().and_then(|del| del.content.as_ref());
 
+	match adelims {
+		Some(del) => repeat(
+			0..,
+			alt((
+				between(&del).map(|ans| Segment::Answer(ans.into())),
+				a.map(|tc| Segment::ToolCall(tc)),
+			)),
+		)
+		.parse_next(input)?,
+		None => repeat(
+			0..,
+			alt((
+				a.map(|tc| Segment::ToolCall(tc)),
+				take_until(0.., "```").map(|cmt: &str| Segment::Commentary(cmt.into())),
+			)),
+		)
+		.parse_next(input)?,
+	}
+
+	Ok(segments)
+}
+
+fn a(input: &mut &str) -> ModalResult<Vec<Function>> {
 	_ = ("```py", opt("thon")).parse_next(input)?;
-	let tool_calls = separated_foldl1(
+	separated_foldl1(
 		repeat(
 			0..,
 			alt((
@@ -120,12 +141,7 @@ pub fn parse_py(input: &mut &str, delims: &Option<Delims>) -> ModalResult<Respon
 			l
 		},
 	)
-	.parse_next(input)?;
-	Ok(Response {
-		reasoning,
-		content,
-		tool_calls,
-	})
+	.parse_next(input)
 }
 
 pub fn py_comment(input: &mut &str) -> ModalResult<()> {
