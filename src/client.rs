@@ -28,20 +28,25 @@ impl<'s, S> Request<'s, S> {
 		mut on_token: Option<impl FnMut(String)>,
 	) -> Result<Response, Error> {
 		let mut buf = String::new();
+		let mut rbuf = String::new();
 		let mut tool_calls = Vec::new();
-		let content = self.stream()?.fold(String::new(), |acc, chunk| {
+		let mut content = String::new();
+		let mut reasoning = String::new();
+		for chunk in self.stream()? {
 			let Ok(chunk) = chunk else {
-				return acc;
+				continue;
 			};
 
 			let Some(Choice {
-				delta: Delta {
-					content,
-					tool_calls: tcs,
-				},
+				delta:
+					Delta {
+						content: cnt,
+						reasoning_content,
+						tool_calls: tcs,
+					},
 			}) = chunk.choices.into_iter().next()
 			else {
-				return acc;
+				continue;
 			};
 
 			if let Some(tcs) = tcs {
@@ -51,19 +56,32 @@ impl<'s, S> Request<'s, S> {
 				}));
 			}
 
-			let Some(text) = content else { return acc };
-			buf += &text;
-			while let Some(end) = buf.find('\n') {
-				info!("{}", &buf[..end]);
-				buf = buf.split_off(end + 1);
+			if let Some(text) = cnt {
+				buf += &text;
+				while let Some(end) = buf.find('\n') {
+					info!("{}", &buf[..end]);
+					buf = buf.split_off(end + 1);
+				}
+
+				content.push_str(text.as_str());
+				if let Some(f) = on_token.as_mut() {
+					f(text)
+				}
 			}
 
-			let result = acc + text.as_str();
-			if let Some(f) = on_token.as_mut() {
-				f(text)
+			if let Some(text) = reasoning_content {
+				rbuf += &text;
+				while let Some(end) = rbuf.find('\n') {
+					info!("{}", &rbuf[..end]);
+					rbuf = rbuf.split_off(end + 1);
+				}
+
+				reasoning.push_str(text.as_str());
+				if let Some(f) = on_token.as_mut() {
+					f(text)
+				}
 			}
-			result
-		});
+		}
 
 		Ok(Response {
 			reasoning: None,
@@ -409,6 +427,7 @@ struct Choice {
 #[derive(Debug, Deserialize)]
 struct Delta {
 	content: Option<String>,
+	reasoning_content: Option<String>,
 	tool_calls: Option<Vec<ToolCall>>,
 }
 

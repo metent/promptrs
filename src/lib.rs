@@ -85,8 +85,8 @@ mod client;
 mod parser;
 mod pruner;
 
-pub use client::{Arguments, Function, Message};
-use client::{InnerParams, Params, Request, Response, Segment};
+pub use client::{Arguments, Function, Message, Segment};
+use client::{InnerParams, Params, Request, Response};
 use log::debug;
 use parser::{parse, parse_py};
 use pruner::prune;
@@ -362,8 +362,25 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 				None,
 			),
 		}
-		.unwrap_or(vec![Segment::Commentary(response.content)]);
-		parsed
+		.unwrap_or(vec![Segment::Commentary(response.content)])
+		.into_iter()
+		.filter({
+			let parse_reasoning = response.reasoning.is_none();
+			let parse_tool_calls = response.tool_calls.is_empty();
+			move |seg| match seg {
+				Segment::Reasoning(_) => parse_reasoning,
+				Segment::ToolCall(_) => parse_tool_calls,
+				_ => true,
+			}
+		});
+
+		let mut segments = Vec::new();
+		if let Some(reasoning) = response.reasoning {
+			segments.push(Segment::Reasoning(reasoning));
+		}
+		segments.extend(parsed);
+		segments.push(Segment::ToolCall(response.tool_calls));
+		segments
 	}
 
 	fn execute_tools(&mut self, state: &mut S, tool_calls: Vec<Function>) -> bool {
