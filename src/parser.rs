@@ -7,7 +7,7 @@ use winnow::combinator::{
 };
 use winnow::error::{FromExternalError, ParserError};
 use winnow::stream::{Accumulate, AsChar};
-use winnow::token::{one_of, rest, take_till, take_until, take_while};
+use winnow::token::{one_of, take_till, take_until, take_while};
 use winnow::{ModalResult, Parser, Result};
 
 /// Parse assistant response containing JSONschema-based tool calls into structured components
@@ -48,16 +48,31 @@ pub fn parse(
 			0..,
 			alt((
 				between(&tdel).map(|tc| Segment::ToolCall(parse_json(tc))),
-				take_until(0.., tdel.0.as_str()).map(|cmt: &str| Segment::Commentary(cmt.into())),
+				between(&("\n```".into(), "\n```".into())).map(parse_block),
+				take_until(0.., (tdel.0.as_str(), "\n```"))
+					.map(|cmt: &str| Segment::Commentary(cmt.into())),
 			)),
 		)
 		.parse_next(input)?,
-		(None, None) => {
-			repeat(0.., rest.map(|ans: &str| Segment::Commentary(ans.into()))).parse_next(input)?
-		}
+		(None, None) => repeat(
+			0..,
+			alt((
+				between(&("\n```".into(), "\n```".into())).map(parse_block),
+				take_until(0.., "\n```").map(|cmt: &str| Segment::Commentary(cmt.into())),
+			)),
+		)
+		.parse_next(input)?,
 	}
 
 	Ok(segments)
+}
+
+fn parse_block(s: &str) -> Segment {
+	let (lang, block) = s.split_once("\n").unzip();
+	Segment::CodeBlock(
+		lang.and_then(|l| l.len().ne(&0).then_some(l.into())),
+		block.unwrap_or(s).into(),
+	)
 }
 
 fn between<'s, E: ParserError<&'s str>>(
