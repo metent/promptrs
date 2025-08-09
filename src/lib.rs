@@ -253,7 +253,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	}
 
 	/// Register a callback that receives each token that the assistant streams.
-	pub fn on_token<F: FnMut(&mut S, String)>(
+	pub fn on_token<F: FnMut(&mut S, String, bool)>(
 		self,
 		on_token: F,
 	) -> SendAndHandleTokenState<'c, 's, S, F> {
@@ -270,13 +270,13 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	/// structure that contains the assistant reply as `text` – ready
 	/// for printing or sending back to the LLM.
 	pub fn process(self, state: &mut S) -> Result<ReceivedState<'c, 's, S>, io::Error> {
-		self.process_inner(state, None::<fn(&mut S, String)>)
+		self.process_inner(state, None::<fn(&mut S, String, bool)>)
 	}
 
 	fn process_inner(
 		mut self,
 		state: &mut S,
-		mut on_token: Option<impl FnMut(&mut S, String)>,
+		mut on_token: Option<impl FnMut(&mut S, String, bool)>,
 	) -> Result<ReceivedState<'c, 's, S>, io::Error> {
 		self.push_initial_status(state);
 
@@ -285,7 +285,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		let completion = self.completion(
 			on_token
 				.as_mut()
-				.map(|handler| |token| handler(state, token)),
+				.map(|handler| |token, is_reasoning| handler(state, token, is_reasoning)),
 		)?;
 		let segments = self.parse(completion);
 		let assistant = segments.iter().fold("".to_string(), |acc, seg| match seg {
@@ -323,7 +323,10 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		})
 	}
 
-	fn completion(&self, on_token: Option<impl FnMut(String)>) -> Result<Response, std::io::Error> {
+	fn completion(
+		&self,
+		on_token: Option<impl FnMut(String, bool)>,
+	) -> Result<Response, std::io::Error> {
 		Ok(Request {
 			api_key: &self.config.api_key,
 			base_url: &self.config.base_url,
@@ -460,12 +463,12 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 }
 
 /// Wrapper around a `SendState` + a token callback.
-pub struct SendAndHandleTokenState<'c, 's, S, F: FnMut(&mut S, String)> {
+pub struct SendAndHandleTokenState<'c, 's, S, F: FnMut(&mut S, String, bool)> {
 	send_state: SendState<'c, 's, S>,
 	on_token: F,
 }
 
-impl<'c, 's, S, F: FnMut(&mut S, String)> SendAndHandleTokenState<'c, 's, S, F> {
+impl<'c, 's, S, F: FnMut(&mut S, String, bool)> SendAndHandleTokenState<'c, 's, S, F> {
 	/// Adds additional messages to the history
 	pub fn messages(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
 		self.send_state.messages.extend(messages);

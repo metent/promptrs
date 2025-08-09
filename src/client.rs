@@ -25,7 +25,7 @@ impl<'s, S> Request<'s, S> {
 	/// Sends the chat completion request and processes streaming response.
 	pub fn chat_completion(
 		&self,
-		mut on_token: Option<impl FnMut(String)>,
+		mut on_token: Option<impl FnMut(String, bool)>,
 	) -> Result<Response, Error> {
 		let mut buf = String::new();
 		let mut rbuf = String::new();
@@ -65,7 +65,7 @@ impl<'s, S> Request<'s, S> {
 
 				content.push_str(text.as_str());
 				if let Some(f) = on_token.as_mut() {
-					f(text)
+					f(text, false)
 				}
 			}
 
@@ -78,7 +78,7 @@ impl<'s, S> Request<'s, S> {
 
 				reasoning.push_str(text.as_str());
 				if let Some(f) = on_token.as_mut() {
-					f(text)
+					f(text, true)
 				}
 			}
 		}
