@@ -1,30 +1,26 @@
 #![deny(missing_docs)]
 
-//! # promptrs
+//! # `promptrs`
 //!
 //! This crate provides a framework for building agentic workflows that integrate language models
 //! with tool calling capabilities. It handles conversation management, API interactions, tool
 //! invocation, and response parsing in a streamlined, composable manner. The core design
 //! philosophy is to enable fluent method chaining while maintaining minimal state management.
+//! `promptrs` keeps everything synchronous, tiny, and highly composable, making it easy to drop
+//! into any existing Rust binary or library.
 //!
-//! ## Features
-//!
-//! - Streamed API communication with incremental message processing
-//! - Multi-tool support with function call validation and error handling
-//! - Configurable delimiters for custom message formatting
-//! - Automated message pruning for context size management
-//! - JSON schema generation for tool documentation
-//! - Pythonic tool calling support
-//!
-//! ## Usage Overview
-//!
-//! 1. **Configure API**: Set up model parameters and credentials
-//! 2. **Define Tools**: Create functions with `#[tool]` attribute
-//! 3. **Build Workflow**: Chain configuration and tool registration
-//! 4. **Process Messages**: Handle user input through fluent API
-//! 5. **Handle Responses**: Manage tool calls and state updates
-//!
-//! ## Example: Basic Workflow
+//! It allows you to write agents using a builder pattern using which it can:
+//! * Keep a conversation history with soft‑pruning.
+//! * Call user‑defined **tools** (Rust functions) from the assistant’s reply.
+//! * Parse and format tool calls in three different styles:
+//!   * OpenAI JSON‑schema / function calls (default when `paradigm: Server`)
+//!   * Custom JSON‑schema wrapped in delimiters (`ToolCallParadigm::JsonSchema`)
+//!   * A *Pythonic* style – the assistant emits a python function call in a code block.
+//! * Add a **status** tool that can report any agent state after each user message.
+//! * Stream the assistant’s reply in “real‑time” and optionally hand every token to a
+//!   user supplied callback.
+//! * Serialize a lot of configuration from a single struct that can be deserialized
+//!   from JSON/YAML.
 //!
 //! ```rust
 //! use promptrs::{ToolCallParadigm, UserConfig, tool};
@@ -35,49 +31,30 @@
 //!     notes: HashMap<String, String>,
 //! }
 //!
-//! /// Tool implementation for note-taking
-//! /// id: Unique ID for note
-//! /// title: Note title
 //! #[tool]
 //! fn add_note(state: &mut AppState, id: String, title: String) -> String {
-//!     // Actual implementation would store the note
-//!     format!("Note {id} added with title: {title}")
+//!     state.notes.insert(id.clone(), title);
+//!     format!("✅ Note '{}' added", id)
 //! }
 //!
-//! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Configure language model
-//!     let config = UserConfig::builder()
-//!         .api_key(Some("sk-examplekey".to_string()))
-//!         .temperature(Some(0.3))
+//! fn main() -> anyhow::Result<()> {
+//!     let cfg = UserConfig::builder()
+//!         .api_key(Some("sk-…".into()))
+//!         .base_url("https://api.openai.com".into())
+//!         .model("gpt-4o-mini".into())
 //!         .paradigm(ToolCallParadigm::Pythonic)
 //!         .char_limit(8192)
-//!         .build("https://api.openai.com".to_string(), "gpt-4".to_string());
+//!         .build();
 //!
-//!     // Initialize conversation state
 //!     let mut state = AppState::default();
-//!
-//!     // Setup conversation with system prompt and tools
-//!     let init = config
-//!         .system(Some(
-//!             "You are an assistant that helps organize notes. Use add_note for new notes.",
-//!         ))
-//!         .tool(add_note);
-//!
-//!     // Process user interaction
-//!     let response = init
-//!         .user("Create a note about meeting agenda".to_string())
+//!     let reply = cfg
+//!         .system(Some("Assistant helps with note taking"))
+//!         .tool(add_note)
+//!         .user("Add a note titled ‘Meeting’")
 //!         .process(&mut state)?;
 //!
-//!     println!("Assistant response: {}", response.text);
-//!
-//!     // Continue conversation
-//!     let next = response
-//!         .user("Add a note for 'Creating promptrs'".to_string())
-//!         .process(&mut state)?;
-//!
-//!     println!("Follow-up response: {}", next.text);
-//!
-//!     Ok(())
+//!     println!("{:?}", reply.text);
+//! #   Ok(())
 //! }
 //! ```
 
@@ -96,7 +73,21 @@ pub use serde_json;
 use std::io;
 pub use tool_attr_macro::tool;
 
-/// User configuration for API interactions
+/// Configuration for LLM interactions.
+///
+/// The `UserConfig` is meant for long‑lived objects that you can store in a config file or
+/// environment. Deserialize it with `serde_json`, `serde_yaml`, or build it manually through
+/// the builder API.
+///
+/// # Example
+///
+/// ```rust
+/// let cfg = UserConfig::builder()
+///     .api_key(Some("sk-…".into()))
+///     .base_url("https://api.openai.com".into())
+///     .model("gpt-4o".into())
+///     .build();
+/// ```
 #[derive(Default, Deserialize)]
 pub struct UserConfig {
 	/// API authentication key (if required by provider)
@@ -111,12 +102,12 @@ pub struct UserConfig {
 	pub top_p: Option<f64>,
 	/// Delimiters for assistant content
 	pub delims: Option<Delims>,
-	/// Tool calling configuration paradigm
+	/// How tool calls are emitted by the assistant
 	#[serde(flatten)]
 	pub paradigm: ToolCallParadigm,
-	/// System prompt mode
+	/// Whether the system prompt is sent as a system message or as part of the first user message.
 	pub mode: SystemPromptMode,
-	/// Maximum allowed message history length in bytes
+	/// Maximum allowed message history size in bytes
 	pub char_limit: u64,
 	/// Additional chat completion request parameters
 	#[serde(default)]
@@ -128,9 +119,20 @@ impl UserConfig {
 	pub fn builder() -> UserConfigBuilder {
 		UserConfigBuilder(UserConfig::default())
 	}
+
+	/// Start a workflow by adding a system prompt.  The returned `InitState` holds the
+	/// configuration, the system message (if any) and an empty tool list.
+	pub fn system<S>(&self, system: Option<String>) -> InitState<'_, '_, S> {
+		InitState {
+			config: self,
+			system,
+			tools: Vec::new(),
+			status: None,
+		}
+	}
 }
 
-/// Builder for constructing a `UserConfig` with fluent API
+/// Convenience type for building an LLM configuration.
 pub struct UserConfigBuilder(UserConfig);
 
 impl UserConfigBuilder {
@@ -184,18 +186,6 @@ impl UserConfigBuilder {
 	}
 }
 
-impl UserConfig {
-	/// Initializes workflow configuration with system message
-	pub fn system<S>(&self, system: Option<String>) -> InitState<'_, '_, S> {
-		InitState {
-			config: self,
-			system,
-			tools: Vec::new(),
-			status: None,
-		}
-	}
-}
-
 /// Initial agent state containing system configuration
 pub struct InitState<'c, 's, S> {
 	config: &'c UserConfig,
@@ -205,7 +195,10 @@ pub struct InitState<'c, 's, S> {
 }
 
 impl<'c, 's, S> InitState<'c, 's, S> {
-	/// Starts user message chain
+	/// Add a first user message and turn the builder into a *SendState*.
+	///
+	/// This moves the system prompt into the messages array and returns
+	/// a new struct that is ready for extra messages and token callbacks.
 	pub fn user(self, user: String) -> SendState<'c, 's, S> {
 		let messages = self
 			.system
@@ -227,14 +220,21 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 		self
 	}
 
-	/// Sets status monitoring tool
+	/// Register a *status* function that will be called once after the
+	/// LLM has processed a user request.  The return value becomes a
+	/// message of type `Message::Status`, which is later filtered out
+	/// and persisted across turns.
 	pub fn status(mut self, tool: Tool<'s, S>) -> Self {
 		self.status = Some(tool);
 		self
 	}
 }
 
-/// Active processing state containing message history
+/// State that actually sends the request.
+///
+/// Holds the conversation history and the tool set.  It can emit a callback
+/// for every streaming token, execute the tools found in the assistant reply,
+/// run the status tool, and return a `ReceivedState` that can be continued.
 pub struct SendState<'c, 's, S> {
 	config: &'c UserConfig,
 	messages: Vec<Message>,
@@ -243,13 +243,16 @@ pub struct SendState<'c, 's, S> {
 }
 
 impl<'c, 's, S> SendState<'c, 's, S> {
+	/// Add an arbitrary list of messages to the history.
+	///
+	/// Useful for bulk‑adding system, user or assistant messages.
 	/// Adds additional messages to the history
 	pub fn messages(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
 		self.messages.extend(messages);
 		self
 	}
 
-	/// Attaches token processing callback
+	/// Register a callback that receives each token that the assistant streams.
 	pub fn on_token<F: FnMut(&mut S, String)>(
 		self,
 		on_token: F,
@@ -260,15 +263,16 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		}
 	}
 
-	/// Sends chat completion request, and handles parsing and tool call invocations
+	/// Dispatch the request and parse the response.
+	///
+	/// It performs a *synchronous* network request, parses the chunks,
+	/// executes any tool calls and the status tool, and returns a
+	/// structure that contains the assistant reply as `text` – ready
+	/// for printing or sending back to the LLM.
 	pub fn process(self, state: &mut S) -> Result<ReceivedState<'c, 's, S>, io::Error> {
 		self.process_inner(state, None::<fn(&mut S, String)>)
 	}
 
-	/// Invoke chat completion API
-	/// Parse assistant message and tool calls from raw assistant response text
-	/// Invoke all tool calls
-	/// Invoke a special tool that tracks completion status
 	fn process_inner(
 		mut self,
 		state: &mut S,
@@ -455,7 +459,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	}
 }
 
-/// Processing state with token handling callback
+/// Wrapper around a `SendState` + a token callback.
 pub struct SendAndHandleTokenState<'c, 's, S, F: FnMut(&mut S, String)> {
 	send_state: SendState<'c, 's, S>,
 	on_token: F,
@@ -474,7 +478,9 @@ impl<'c, 's, S, F: FnMut(&mut S, String)> SendAndHandleTokenState<'c, 's, S, F> 
 	}
 }
 
-/// Result state after processing
+/// Result of processing a user request.
+///
+/// Contains the raw text (without the reasoning wrapper) and the updated history.
 pub struct ReceivedState<'c, 's, S> {
 	config: &'c UserConfig,
 	messages: Vec<Message>,
@@ -498,13 +504,13 @@ impl<'c, 's, T> ReceivedState<'c, 's, T> {
 		}
 	}
 
-	/// Get tool call messages
+	/// Return a slice of tool‑call messages that were invoked during the latest iteration.
 	pub fn tool_calls(&self) -> &[Message] {
 		&self.messages[self.messages.len() - self.nbtc..]
 	}
 }
 
-/// Tool calling paradigm configuration
+/// How the assistant should format / interpret tool calls.
 #[derive(Default, Deserialize)]
 #[serde(tag = "paradigm", rename_all = "snake_case")]
 pub enum ToolCallParadigm {
