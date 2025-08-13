@@ -84,7 +84,7 @@ impl<'s, S> Request<'s, S> {
 		}
 
 		Ok(Response {
-			reasoning: None,
+			reasoning: reasoning.len().gt(&0).then_some(reasoning),
 			content,
 			tool_calls,
 		})
