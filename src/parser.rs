@@ -11,14 +11,14 @@ pub fn parse(input: &mut &str, delims: Option<&Delims>) -> ModalResult<Vec<Segme
 		let reasoning = opt(between(rdelims))
 			.map(|s: Option<&str>| s.map(|s| Segment::Reasoning(s.into())))
 			.parse_next(input)?;
-		segments.extend(reasoning.into_iter());
+		segments.extend(reasoning);
 	}
 
 	match delims.as_ref().and_then(|del| del.content.as_ref()) {
 		Some(adel) => repeat(
 			0..,
 			alt((
-				between(&adel).map(|ans| Segment::Answer(ans.into())),
+				between(adel).map(|ans| Segment::Answer(ans.into())),
 				take_until(0.., adel.0.as_str()).map(|cmt: &str| Segment::Commentary(cmt.into())),
 			)),
 		)
