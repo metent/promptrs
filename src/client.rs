@@ -1,6 +1,6 @@
 //! Core client implementation for chat completions.
 
-use super::{SystemPromptMode, Tool, ToolCallParadigm, ToolDelims};
+use super::{SystemPromptMode, Tool};
 use attohttpc::body::Json;
 use attohttpc::header::CONTENT_TYPE;
 use attohttpc::{Error, TextReader};
@@ -8,8 +8,8 @@ use either::IntoEither;
 use log::info;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use serde_json::json;
 use serde_json::value::RawValue;
-use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader};
 use std::time::Duration;
@@ -158,9 +158,8 @@ impl<S> Serialize for Params<'_, S> {
 		map.serialize_entry("temperature", &self.temperature)?;
 		map.serialize_entry("top_p", &self.top_p)?;
 		map.serialize_entry("messages", &self.inner)?;
-		if matches!(self.inner.paradigm, ToolCallParadigm::Server) {
-			map.serialize_entry("tools", self.inner.tools)?;
-		}
+		let tools = self.inner.tools.iter().chain(self.inner.status.iter());
+		map.serialize_entry("tools", &tools.collect::<Vec<_>>())?;
 		map.serialize_entry("stream", &self.stream)?;
 		for (key, value) in self.extra.iter() {
 			map.serialize_entry(key, value)?;
@@ -171,7 +170,6 @@ impl<S> Serialize for Params<'_, S> {
 
 pub struct InnerParams<'s, S> {
 	pub messages: &'s [Message],
-	pub paradigm: &'s ToolCallParadigm,
 	pub tools: &'s [Tool<'s, S>],
 	pub status: &'s Option<Tool<'s, S>>,
 	pub mode: SystemPromptMode,
@@ -179,13 +177,7 @@ pub struct InnerParams<'s, S> {
 
 impl<S> Serialize for InnerParams<'_, S> {
 	fn serialize<R: Serializer>(&self, serializer: R) -> Result<R::Ok, R::Error> {
-		let InnerParams {
-			messages,
-			paradigm,
-			tools,
-			status,
-			mode,
-		} = self;
+		let InnerParams { messages, mode, .. } = self;
 		let mut seq = serializer.serialize_seq(Some(messages.len()))?;
 
 		let mut messages = messages.iter();
@@ -197,25 +189,18 @@ impl<S> Serialize for InnerParams<'_, S> {
 				| Message::Status((Function { name, arguments }, tool)),
 			) = curr
 			{
-				let pair = match &paradigm {
-					ToolCallParadigm::Server => (
-						"tool_calls",
-						json!([{
-							"function": {
-								"name": name,
-								"arguments": serde_json::to_string(arguments)
-									.unwrap_or_default(),
-							},
-							"id": "0",
-							"type": "function",
-						}]),
-					),
-					ToolCallParadigm::JsonSchema(delims) => {
-						("content", format_jsonschema_call(name, arguments, delims))
-					}
-					ToolCallParadigm::Pythonic => ("content", format_python_call(name, arguments)),
-					ToolCallParadigm::None => ("content", "".into()),
-				};
+				let pair = (
+					"tool_calls",
+					json!([{
+						"function": {
+							"name": name,
+							"arguments": serde_json::to_string(arguments)
+								.unwrap_or_default(),
+						},
+						"id": "0",
+						"type": "function",
+					}]),
+				);
 				seq.serialize_element(&HashMap::from([("role", "assistant".into()), pair]))?;
 				seq.serialize_element(&HashMap::from([("role", "tool"), ("content", tool)]))?;
 				curr = messages.next();
@@ -223,16 +208,14 @@ impl<S> Serialize for InnerParams<'_, S> {
 
 			let Some(message) = curr else { break };
 
-			let prompt;
 			let (role, content) = match message {
 				Message::System(content) => {
-					prompt = construct_system_msg(content, paradigm, tools, status);
 					curr = messages.next();
 					match curr {
 						Some(Message::User(user)) if matches!(mode, SystemPromptMode::User) => {
-							("user", &format!("{prompt}\n\n{user}"))
+							("user", &format!("{content}\n\n{user}"))
 						}
-						_ => ("system", &prompt),
+						_ => ("system", content),
 					}
 				}
 				Message::User(content) => ("user", content),
@@ -246,111 +229,6 @@ impl<S> Serialize for InnerParams<'_, S> {
 		}
 		seq.end()
 	}
-}
-
-fn construct_system_msg<'s, S>(
-	base: &str,
-	paradigm: &ToolCallParadigm,
-	tools: &[Tool<'s, S>],
-	status: &Option<Tool<'s, S>>,
-) -> String {
-	match paradigm {
-		ToolCallParadigm::JsonSchema(ToolDelims {
-			available_tools,
-			tool_call,
-			..
-		}) => {
-			let jsonschema = jsonschema(tools, status);
-			if jsonschema.is_empty() {
-				return base.into();
-			}
-			format!(
-				r#"{base}
-
-# Tools
-
-You may call one or more functions to assist with the user query.
-
-You are provided with function signatures within {at_start} and {at_end}:
-{at_start}{jsonschema}{at_end}
-
-For each function call, return a json object with function name and arguments within {tc_start} and {tc_end}:
-{tc_start}{{"name": <function-name>, "arguments": <args-json-object>}}{tc_end}
-"#,
-				at_start = available_tools.0,
-				at_end = available_tools.1,
-				tc_start = tool_call.0,
-				tc_end = tool_call.1,
-			)
-		}
-		ToolCallParadigm::Pythonic => {
-			let pydefs = pydefs(tools, status);
-			if pydefs.is_empty() {
-				return base.into();
-			}
-			format!(
-				r#"{base}
-
-# Tools
-
-You are provided with the following python APIs to assist with the user query:
-```py
-{pydefs}
-```
-You can invoke any of these tools by writing a python function call inside a python code block.
-"#,
-			)
-		}
-		_ => base.into(),
-	}
-}
-
-fn jsonschema<'s, S>(tools: &[Tool<'s, S>], status: &Option<Tool<'s, S>>) -> String {
-	let mut schemas = Vec::new();
-	for tool in tools.iter().chain(status.iter()) {
-		schemas.push(format!(
-			r#"{{"name":"{}","arguments":{}}}"#,
-			tool.name, tool.jsonschema
-		));
-	}
-	serde_json::to_string_pretty(&schemas).unwrap_or_else(|err| err.to_string())
-}
-
-fn pydefs<'s, S>(tools: &[Tool<'s, S>], status: &Option<Tool<'s, S>>) -> String {
-	tools
-		.iter()
-		.chain(status.iter())
-		.fold("".into(), |acc, tool| acc + tool.pydef + "\n")
-}
-
-fn format_jsonschema_call(
-	name: &str,
-	arguments: &serde_json::Map<String, serde_json::Value>,
-	ToolDelims {
-		tool_call: (start, end),
-		..
-	}: &ToolDelims,
-) -> Value {
-	format!(
-		"{start}{}{end}",
-		serde_json::to_string(&json!({
-			"name": name,
-			"arguments": arguments,
-		}))
-		.unwrap_or_default()
-	)
-	.into()
-}
-
-fn format_python_call(name: &str, arguments: &serde_json::Map<String, serde_json::Value>) -> Value {
-	let mut args = arguments
-		.iter()
-		.map(|(name, value)| format!("{name}={value}, "))
-		.collect::<String>();
-	if args.ends_with(", ") {
-		args.truncate(args.len() - 2);
-	}
-	format!("```py\n{name}({args})\n```").into()
 }
 
 impl<S> Serialize for Tool<'_, S> {

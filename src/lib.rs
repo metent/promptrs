@@ -65,7 +65,7 @@ mod pruner;
 pub use client::{Arguments, Function, Message, Segment};
 use client::{InnerParams, Params, Request, Response};
 use log::debug;
-use parser::{parse, parse_py};
+use parser::parse;
 use pruner::prune;
 pub use serde;
 use serde::Deserialize;
@@ -102,9 +102,6 @@ pub struct UserConfig {
 	pub top_p: Option<f64>,
 	/// Delimiters for assistant content
 	pub delims: Option<Delims>,
-	/// How tool calls are emitted by the assistant
-	#[serde(flatten)]
-	pub paradigm: ToolCallParadigm,
 	/// Whether the system prompt is sent as a system message or as part of the first user message.
 	pub mode: SystemPromptMode,
 	/// Maximum allowed message history size in bytes
@@ -157,12 +154,6 @@ impl UserConfigBuilder {
 	/// Sets delimiters for assistant content
 	pub fn delims(mut self, delims: Option<Delims>) -> Self {
 		self.0.delims = delims;
-		self
-	}
-
-	/// Configures tool invocation paradigm
-	pub fn paradigm(mut self, paradigm: ToolCallParadigm) -> Self {
-		self.0.paradigm = paradigm;
 		self
 	}
 
@@ -336,7 +327,6 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 				top_p: self.config.top_p,
 				inner: InnerParams {
 					messages: &self.messages,
-					paradigm: &self.config.paradigm,
 					tools: &self.tools,
 					status: &self.status,
 					mode: self.config.mode,
@@ -349,26 +339,11 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	}
 
 	fn parse(&self, response: Response) -> Vec<Segment> {
-		let parsed = match &self.config.paradigm {
-			ToolCallParadigm::Server => parse(
-				&mut response.content.as_str(),
-				self.config.delims.as_ref(),
-				None,
-			),
-			ToolCallParadigm::JsonSchema(delims) => parse(
-				&mut response.content.as_str(),
-				self.config.delims.as_ref(),
-				Some(delims),
-			),
-			ToolCallParadigm::Pythonic => {
-				parse_py(&mut response.content.as_str(), self.config.delims.as_ref())
-			}
-			ToolCallParadigm::None => parse(
-				&mut response.content.as_str(),
-				self.config.delims.as_ref(),
-				None,
-			),
-		}
+		let parsed = parse(
+			&mut response.content.as_str(),
+			self.config.delims.as_ref(),
+			None,
+		)
 		.unwrap_or(vec![Segment::Commentary(response.content)])
 		.into_iter()
 		.filter({
@@ -568,8 +543,6 @@ pub struct Tool<'s, S> {
 	pub description: &'s str,
 	/// Tool parameters in JSON schema format
 	pub jsonschema: &'s str,
-	/// Tool python function definition
-	pub pydef: &'s str,
 	/// Pointer to tool implementation
 	pub call:
 		fn(state: &mut S, name: &str, arguments: &mut Arguments) -> serde_json::Result<String>,

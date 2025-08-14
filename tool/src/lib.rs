@@ -46,14 +46,10 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 		};
 		Some(lit_str.value())
 	});
-	let mut pycomments = String::new();
 	let mut prev = None;
 	let mut description = String::new();
 	let mut attr_map = HashMap::<String, String>::new();
 	for mut line in doc_comments {
-		pycomments.push_str("#");
-		pycomments.push_str(&line);
-		pycomments.push_str("\n");
 		line = line.split_off(line.find(line.trim_start()).unwrap_or(0));
 		if let Some(i) = line.find(':') {
 			if let Some((param, desc)) = prev {
@@ -78,7 +74,6 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 	}
 
 	let mut params = Vec::new();
-	let mut pyparams = Vec::new();
 	let mut required_params = Vec::new();
 	let mut args = Vec::new();
 	let mut call_stmts = Vec::new();
@@ -107,7 +102,6 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 				};
 				let desc = attr_map.get(&name).cloned().unwrap_or_default();
 				let (schema, required) = jsonschema(ty.clone(), desc);
-				let pyschema = pythonschema(&ty);
 
 				args.push(ident.clone());
 				if required {
@@ -138,7 +132,6 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 				}
 
 				params.push(format!(r#""{}": {}"#, name, schema));
-				pyparams.push(format!("{}: {}", name, pyschema));
 				if required {
 					required_params.push(name);
 				}
@@ -166,14 +159,12 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 	let name = ident.to_string();
 	let call = syn::Ident::new(&format!("_{name}"), Span::call_site());
 	let fun = syn::Ident::new(&format!("__{name}"), Span::call_site());
-	let pydef = format!("{}def {}({})", pycomments, name, pyparams.join(", "));
 	let output = quote! {
 		#[allow(non_upper_case_globals)]
 		const #ident: ::promptrs::Tool<'static, #state_ty> = ::promptrs::Tool {
 			name: #name,
 			description: #description,
 			jsonschema: #jsonschema,
-			pydef: #pydef,
 			call: #call,
 		};
 
@@ -271,64 +262,6 @@ fn _jsonschema(ty: &syn::Type) -> String {
 				_ => "".into(),
 			};
 			format!(r#"{{ "type": "{}""#, ty)
-		}
-		_ => "unknown".into(),
-	}
-}
-
-fn pythonschema(ty: &syn::Type) -> String {
-	match ty {
-		syn::Type::Array(syn::TypeArray { elem, .. }) => {
-			format!("list[{}]", pythonschema(&elem))
-		}
-		syn::Type::Reference(syn::TypeReference { elem, .. }) => pythonschema(&elem),
-		syn::Type::Slice(syn::TypeSlice { elem, .. }) => {
-			let inner = pythonschema(&elem);
-			if &inner == "str" {
-				return "str".into();
-			}
-			format!("list[{}]", pythonschema(&elem))
-		}
-		syn::Type::Path(syn::TypePath { path, .. }) => {
-			let (ident, arguments) = match path.segments.last() {
-				Some(syn::PathSegment {
-					ident, arguments, ..
-				}) => (ident.into_token_stream().to_string(), arguments),
-				None => return "".into(),
-			};
-			match ident.as_str() {
-				"String" | "str" | "char" => "str".into(),
-				"f32" | "f64" => "float".into(),
-				"u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" => "int".into(),
-				"bool" => "bool".into(),
-				"Option" => {
-					let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
-						args,
-						..
-					}) = arguments
-					else {
-						return "".into();
-					};
-					let Some(syn::GenericArgument::Type(ty)) = args.first() else {
-						return "".into();
-					};
-					format!("Optional[{}]", pythonschema(ty))
-				}
-				"Vec" => {
-					let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
-						args,
-						..
-					}) = arguments
-					else {
-						return "".into();
-					};
-					let Some(syn::GenericArgument::Type(ty)) = args.first() else {
-						return "".into();
-					};
-					format!("list[{}]", pythonschema(ty))
-				}
-				_ => "".into(),
-			}
 		}
 		_ => "unknown".into(),
 	}
