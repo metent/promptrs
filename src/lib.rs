@@ -340,22 +340,18 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	}
 
 	fn parse(&self, response: Response) -> Vec<Segment> {
-		let parsed = parse(
-			&mut response.content.as_str(),
-			self.config.delims.as_ref(),
-			None,
-		)
-		.unwrap_or(vec![Segment::Commentary(response.content)])
-		.into_iter()
-		.filter({
-			let parse_reasoning = response.reasoning.is_none();
-			let parse_tool_calls = response.tool_calls.is_empty();
-			move |seg| match seg {
-				Segment::Reasoning(_) => parse_reasoning,
-				Segment::ToolCall(_) => parse_tool_calls,
-				_ => true,
-			}
-		});
+		let parsed = parse(&mut response.content.as_str(), self.config.delims.as_ref())
+			.unwrap_or(vec![Segment::Commentary(response.content)])
+			.into_iter()
+			.filter({
+				let parse_reasoning = response.reasoning.is_none();
+				let parse_tool_calls = response.tool_calls.is_empty();
+				move |seg| match seg {
+					Segment::Reasoning(_) => parse_reasoning,
+					Segment::ToolCall(_) => parse_tool_calls,
+					_ => true,
+				}
+			});
 
 		let mut segments = Vec::new();
 		if let Some(reasoning) = response.reasoning {
@@ -489,21 +485,6 @@ impl<'c, 's, T> ReceivedState<'c, 's, T> {
 	}
 }
 
-/// How the assistant should format / interpret tool calls.
-#[derive(Default, Deserialize)]
-#[serde(tag = "paradigm", rename_all = "snake_case")]
-pub enum ToolCallParadigm {
-	/// Rely on server for tool call parsing and formatting
-	Server,
-	/// Standard, JSONschema based tool calling
-	JsonSchema(ToolDelims),
-	/// Pythonic tool calling
-	Pythonic,
-	/// No tool calling
-	#[default]
-	None,
-}
-
 /// System prompt mode
 #[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -522,17 +503,6 @@ pub struct Delims {
 	pub reasoning: (String, String),
 	/// Optional delimiters for assistant answer
 	pub content: Option<(String, String)>,
-}
-
-/// Delimiter configuration for parsing and formatting tool calls.
-#[derive(Default, Deserialize)]
-pub struct ToolDelims {
-	/// Delimiters for available tools section
-	pub available_tools: (String, String),
-	/// Delimiters for tool call blocks
-	pub tool_call: (String, String),
-	/// Delimiters for tool response blocks
-	pub tool_response: (String, String),
 }
 
 /// Tool metadata
