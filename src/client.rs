@@ -183,6 +183,17 @@ impl<S> Serialize for InnerParams<'_, S> {
 		let mut messages = messages.iter();
 		let mut curr = messages.next();
 
+		if let (Some(Message::System(system)), SystemPromptMode::User) = (curr, mode) {
+			let mut content = system.clone();
+			if let Some(Message::User(user)) = curr {
+				content.push_str("\n\n");
+				content.push_str(user);
+			}
+			seq.serialize_element(&HashMap::from([("role", "user"), ("content", &content)]))?;
+			_ = messages.next();
+			curr = messages.next();
+		}
+
 		loop {
 			while let Some(
 				Message::ToolCall((Function { name, arguments }, tool))
@@ -209,15 +220,7 @@ impl<S> Serialize for InnerParams<'_, S> {
 			let Some(message) = curr else { break };
 
 			let (role, content) = match message {
-				Message::System(content) => {
-					curr = messages.next();
-					match curr {
-						Some(Message::User(user)) if matches!(mode, SystemPromptMode::User) => {
-							("user", &format!("{content}\n\n{user}"))
-						}
-						_ => ("system", content),
-					}
-				}
+				Message::System(content) => ("user", content),
 				Message::User(content) => ("user", content),
 				Message::Assistant(content) => ("assistant", content),
 				_ => unreachable!(),
