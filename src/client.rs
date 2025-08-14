@@ -7,7 +7,7 @@ use attohttpc::{Error, TextReader};
 use either::IntoEither;
 use log::info;
 use serde::ser::{SerializeMap, SerializeSeq};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
@@ -38,6 +38,7 @@ impl<'s, S> Request<'s, S> {
 			};
 
 			let Some(Choice {
+				index,
 				delta:
 					Delta {
 						content: cnt,
@@ -50,10 +51,20 @@ impl<'s, S> Request<'s, S> {
 			};
 
 			if let Some(tcs) = tcs {
-				tool_calls.extend(tcs.into_iter().map(|tc| Function {
-					name: tc.function.name,
-					arguments: tc.function.arguments,
-				}));
+				for ToolCall { function } in tcs {
+					if index + 1 > tool_calls.len() {
+						tool_calls.resize(index + 1, RawFunction::default());
+					}
+
+					let name = tool_calls[index].name.take().unwrap_or_default();
+					tool_calls[index].name =
+						Some(name + function.name.as_ref().map_or("", |name| name.as_str()));
+
+					let arguments = tool_calls[index].arguments.take().unwrap_or_default();
+					tool_calls[index].arguments = Some(
+						arguments + function.arguments.as_ref().map_or("", |args| args.as_str()),
+					);
+				}
 			}
 
 			if let Some(text) = cnt {
@@ -86,7 +97,15 @@ impl<'s, S> Request<'s, S> {
 		Ok(Response {
 			reasoning: reasoning.len().gt(&0).then_some(reasoning),
 			content,
-			tool_calls,
+			tool_calls: tool_calls
+				.into_iter()
+				.filter_map(|tc| {
+					Some(Function {
+						name: tc.name?,
+						arguments: serde_json::from_str(&tc.arguments?).ok()?,
+					})
+				})
+				.collect(),
 		})
 	}
 
@@ -281,6 +300,7 @@ pub struct Response {
 }
 
 /// Response segment
+#[derive(Debug)]
 pub enum Segment {
 	/// Assistant reasoning about response generation
 	Reasoning(String),
@@ -301,6 +321,7 @@ pub struct ChatCompletionChunk {
 
 #[derive(Debug, Deserialize)]
 struct Choice {
+	index: usize,
 	#[serde(alias = "message")]
 	delta: Delta,
 }
@@ -314,27 +335,22 @@ struct Delta {
 
 #[derive(Clone, Debug, Deserialize)]
 struct ToolCall {
-	function: Function,
+	function: RawFunction,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct RawFunction {
+	name: Option<String>,
+	arguments: Option<String>,
 }
 
 /// Represents a function call to an external tool.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Function {
 	/// Name of the tool function to invoke
 	pub name: String,
 	/// Arguments for the tool in JSON format
-	#[serde(deserialize_with = "deserialize_arguments")]
 	pub arguments: Arguments,
-}
-
-fn deserialize_arguments<'de, D: Deserializer<'de>>(
-	deserializer: D,
-) -> Result<Arguments, D::Error> {
-	let s = String::deserialize(deserializer)?;
-	if s.is_empty() {
-		return Ok(Arguments::new());
-	}
-	serde_json::from_str(&s).map_err(de::Error::custom)
 }
 
 /// Tool call arguments

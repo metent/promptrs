@@ -279,6 +279,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 				.map(|handler| |token, is_reasoning| handler(state, token, is_reasoning)),
 		)?;
 		let segments = self.parse(completion);
+		debug!("Segments: {:#?}", segments);
 		let assistant = segments.iter().fold("".to_string(), |acc, seg| match seg {
 			Segment::Answer(s) | Segment::Commentary(s) => acc + s.as_str() + "\n",
 			Segment::CodeBlock(lang, s) => {
