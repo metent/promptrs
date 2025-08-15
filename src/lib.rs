@@ -288,7 +288,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 			_ => acc,
 		});
 
-		if !assistant.is_empty() {
+		if !assistant.trim().is_empty() {
 			self.messages.push(Message::Assistant(assistant.clone()));
 		}
 		let old_len = self.messages.len();
