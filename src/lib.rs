@@ -468,8 +468,8 @@ pub struct ReceivedState<'c, 's, S> {
 
 impl<'c, 's, T> ReceivedState<'c, 's, T> {
 	/// Continues conversation with new user input
-	pub fn user(mut self, user: String) -> SendState<'c, 's, T> {
-		self.messages.push(Message::User(user));
+	pub fn user(mut self, user: Option<String>) -> SendState<'c, 's, T> {
+		self.messages.extend(user.into_iter().map(Message::User));
 		self.messages = prune(self.messages, self.config.char_limit);
 		SendState {
 			config: self.config,
