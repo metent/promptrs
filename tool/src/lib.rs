@@ -159,6 +159,21 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 	let name = ident.to_string();
 	let call = syn::Ident::new(&format!("_{name}"), Span::call_site());
 	let fun = syn::Ident::new(&format!("__{name}"), Span::call_site());
+	let mut result = quote!(::std::string::ToString::to_string(&result));
+	if let syn::ReturnType::Type(_, ty) = &output {
+		if let syn::Type::Path(syn::TypePath { path, .. }) = &**ty {
+			if path
+				.segments
+				.last()
+				.is_some_and(|l| l.ident.to_string().as_str().eq("Result"))
+			{
+				result = quote!(match result {
+					Ok(ok) => ::std::string::ToString::to_string(&ok),
+					Err(err) => ::std::string::ToString::to_string(&err),
+				});
+			}
+		};
+	}
 	let output = quote! {
 		#[allow(non_upper_case_globals)]
 		const #ident: ::promptrs::Tool<'static, #state_ty> = ::promptrs::Tool {
@@ -172,7 +187,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 			let mut left = arguments.clone();
 			#(#call_stmts)*
 			let result = #fun(#(#args,)*);
-			Ok(::std::string::ToString::to_string(&result))
+			Ok(#result)
 		}
 
 		#vis fn #fun #generics (#inputs) #output {
