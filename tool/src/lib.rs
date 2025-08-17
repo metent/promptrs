@@ -257,10 +257,12 @@ fn _jsonschema(ty: &syn::Type) -> String {
 				None => return "".into(),
 			};
 			let ty = match ident.as_str() {
-				"String" | "str" | "char" => "string".into(),
-				"f32" | "f64" => "number".into(),
-				"u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" => "integer".into(),
-				"bool" => "boolean".into(),
+				"String" | "str" | "char" => r#""string""#.into(),
+				"f32" | "f64" => r#""number""#.into(),
+				"u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" => {
+					r#""integer""#.into()
+				}
+				"bool" => r#""boolean""#.into(),
 				"Vec" => {
 					let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
 						args,
@@ -272,11 +274,11 @@ fn _jsonschema(ty: &syn::Type) -> String {
 					let Some(syn::GenericArgument::Type(ty)) = args.first() else {
 						return "".into();
 					};
-					format!(r#"{{ "type": "array", "items": {} }}"#, _jsonschema(&ty))
+					format!(r#""array", "items": {} }}"#, _jsonschema(&ty))
 				}
 				_ => "".into(),
 			};
-			format!(r#"{{ "type": "{}""#, ty)
+			format!(r#"{{ "type": {}"#, ty)
 		}
 		_ => "unknown".into(),
 	}
