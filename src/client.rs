@@ -1,17 +1,16 @@
 //! Core client implementation for chat completions.
-
 use super::{SystemPromptMode, Tool};
-use attohttpc::body::Json;
-use attohttpc::header::CONTENT_TYPE;
-use attohttpc::{Error, TextReader};
 use either::IntoEither;
+use futures_util::{AsyncBufReadExt, Stream, StreamExt, TryStreamExt};
 use log::info;
+use reqwest::Client;
+use reqwest::header::CONTENT_TYPE;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
-use std::io::{self, BufRead, BufReader};
+use std::io;
 use std::time::Duration;
 
 /// Represents a chat completion request configuration.
@@ -23,16 +22,17 @@ pub struct Request<'s, S> {
 
 impl<'s, S> Request<'s, S> {
 	/// Sends the chat completion request and processes streaming response.
-	pub fn chat_completion(
+	pub async fn chat_completion(
 		&self,
 		mut on_token: Option<impl FnMut(String, bool)>,
-	) -> Result<Response, Error> {
+	) -> io::Result<Response> {
 		let mut buf = String::new();
 		let mut rbuf = String::new();
 		let mut tool_calls = Vec::new();
 		let mut content = String::new();
 		let mut reasoning = String::new();
-		for chunk in self.stream()? {
+		let mut stream = Box::pin(self.stream().await?);
+		while let Some(chunk) = stream.next().await {
 			let Ok(chunk) = chunk else {
 				continue;
 			};
@@ -109,55 +109,44 @@ impl<'s, S> Request<'s, S> {
 		})
 	}
 
-	fn stream(
-		&self,
-	) -> Result<ChatCompletionStream<impl Iterator<Item = io::Result<String>>>, Error> {
-		let (status, _, reader) =
-			attohttpc::post(self.base_url.to_string() + "/v1/chat/completions")
-				.read_timeout(Duration::MAX)
-				.into_either(self.api_key.is_some())
-				.right_or_else(|req| req.bearer_auth(self.api_key.as_ref().as_slice()[0]))
-				.header(CONTENT_TYPE, "application/json")
-				.body(Json(&self.body))
-				.send()?
-				.split();
+	async fn stream(&self) -> io::Result<impl Stream<Item = io::Result<ChatCompletionChunk>>> {
+		let response = Client::new()
+			.post(self.base_url.to_string() + "/v1/chat/completions")
+			.timeout(Duration::MAX)
+			.into_either(self.api_key.is_some())
+			.right_or_else(|req| req.bearer_auth(self.api_key.as_ref().as_slice()[0]))
+			.header(CONTENT_TYPE, "application/json")
+			.json(&self.body)
+			.send()
+			.await
+			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+		let status = response.status();
 		if !status.is_success() {
-			let resp = reader.text()?;
-			return Err(Error::from(io::Error::new(
+			let resp = response
+				.text()
+				.await
+				.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+			return Err(io::Error::from(io::Error::new(
 				io::ErrorKind::ConnectionRefused,
-				format!("Status Code: {status}\nResponse: {resp}"),
+				format!("Status Code: {}\nResponse: {resp}", status),
 			)));
 		}
+		let stream = response
+			.bytes_stream()
+			.map(|x| x.map_err(|err| io::Error::new(io::ErrorKind::Other, err)))
+			.into_async_read()
+			.lines()
+			.filter_map(async |l| {
+				let s = l.ok()?;
+				(!s.contains("[DONE]")).then_some(())?;
+				let i = s.find('{')?;
+				Some(serde_json::from_str(&s[i..]).map_err(|err| {
+					io::Error::new(io::ErrorKind::InvalidData, format!("Malformed JSON: {err}"))
+				}))
+			});
 
-		Ok(ChatCompletionStream(
-			BufReader::new(TextReader::new(reader, attohttpc::charsets::UTF_8))
-				.lines()
-				.step_by(2),
-		))
+		Ok(stream)
 	}
-}
-
-pub struct ChatCompletionStream<T: Iterator<Item = io::Result<String>>>(T);
-
-impl<T: Iterator<Item = io::Result<String>>> Iterator for ChatCompletionStream<T> {
-	type Item = io::Result<ChatCompletionChunk>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.0
-			.next()
-			.and_then(|s| s.and_then(next_chunk).transpose())
-	}
-}
-
-fn next_chunk(mut s: String) -> io::Result<Option<ChatCompletionChunk>> {
-	if s.contains("[DONE]") {
-		return Ok(None);
-	}
-	if let Some(i) = s.find('{') {
-		s = s.split_off(i);
-	}
-	serde_json::from_str(&s)
-		.map_err(|err| io::Error::new(io::ErrorKind::InvalidData, format!("Malformed JSON: {err}")))
 }
 
 /// API request parameters

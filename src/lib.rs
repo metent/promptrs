@@ -260,24 +260,27 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	/// executes any tool calls and the status tool, and returns a
 	/// structure that contains the assistant reply as `text` – ready
 	/// for printing or sending back to the LLM.
-	pub fn process(self, state: &mut S) -> Result<ReceivedState<'c, 's, S>, io::Error> {
+	pub async fn process(self, state: &mut S) -> io::Result<ReceivedState<'c, 's, S>> {
 		self.process_inner(state, None::<fn(&mut S, String, bool)>)
+			.await
 	}
 
-	fn process_inner(
+	async fn process_inner(
 		mut self,
 		state: &mut S,
 		mut on_token: Option<impl FnMut(&mut S, String, bool)>,
-	) -> Result<ReceivedState<'c, 's, S>, io::Error> {
+	) -> io::Result<ReceivedState<'c, 's, S>> {
 		self.push_initial_status(state);
 
 		debug!("Messages: {:#?}", self.messages);
 
-		let completion = self.completion(
-			on_token
-				.as_mut()
-				.map(|handler| |token, is_reasoning| handler(state, token, is_reasoning)),
-		)?;
+		let completion = self
+			.completion(
+				on_token
+					.as_mut()
+					.map(|handler| |token, is_reasoning| handler(state, token, is_reasoning)),
+			)
+			.await?;
 		let segments = self.parse(completion);
 		debug!("Segments: {segments:#?}");
 		let assistant = segments.iter().fold("".to_string(), |acc, seg| match seg {
@@ -315,11 +318,8 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		})
 	}
 
-	fn completion(
-		&self,
-		on_token: Option<impl FnMut(String, bool)>,
-	) -> Result<Response, std::io::Error> {
-		Ok(Request {
+	async fn completion(&self, on_token: Option<impl FnMut(String, bool)>) -> io::Result<Response> {
+		Request {
 			api_key: &self.config.api_key,
 			base_url: &self.config.base_url,
 			body: Params {
@@ -336,7 +336,8 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 				extra: &self.config.extra,
 			},
 		}
-		.chat_completion(on_token)?)
+		.chat_completion(on_token)
+		.await
 	}
 
 	fn parse(&self, response: Response) -> Vec<Segment> {
@@ -448,8 +449,10 @@ impl<'c, 's, S, F: FnMut(&mut S, String, bool)> SendAndHandleTokenState<'c, 's, 
 	}
 
 	/// Starts processing with token callback
-	pub fn process(self, state: &mut S) -> Result<ReceivedState<'c, 's, S>, io::Error> {
-		self.send_state.process_inner(state, Some(self.on_token))
+	pub async fn process(self, state: &mut S) -> io::Result<ReceivedState<'c, 's, S>> {
+		self.send_state
+			.process_inner(state, Some(self.on_token))
+			.await
 	}
 }
 
