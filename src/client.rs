@@ -1,9 +1,12 @@
 //! Core client implementation for chat completions.
 use super::{SystemPromptMode, Tool};
 use either::IntoEither;
+#[cfg(not(target_os = "wasi"))]
 use futures_util::{AsyncBufReadExt, Stream, StreamExt, TryStreamExt};
 use log::info;
+#[cfg(not(target_os = "wasi"))]
 use reqwest::Client;
+#[cfg(not(target_os = "wasi"))]
 use reqwest::header::CONTENT_TYPE;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize, Serializer};
@@ -11,7 +14,17 @@ use serde_json::json;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::io;
-use std::time::Duration;
+
+#[cfg(target_os = "wasi")]
+use http::header::{AUTHORIZATION, CONTENT_TYPE};
+#[cfg(target_os = "wasi")]
+use wstd::http::body::IncomingBody;
+#[cfg(target_os = "wasi")]
+use wstd::http::request::JsonRequest;
+#[cfg(target_os = "wasi")]
+use wstd::http::{Client, Request as Req};
+#[cfg(target_os = "wasi")]
+use wstd::io::{AsyncInputStream, AsyncRead as _};
 
 /// Represents a chat completion request configuration.
 pub struct Request<'s, S> {
@@ -31,7 +44,12 @@ impl<'s, S> Request<'s, S> {
 		let mut tool_calls = Vec::new();
 		let mut content = String::new();
 		let mut reasoning = String::new();
+		#[cfg(not(target_os = "wasi"))]
 		let mut stream = Box::pin(self.stream().await?);
+		#[cfg(target_os = "wasi")]
+		let body = self.body().await?;
+		#[cfg(target_os = "wasi")]
+		let mut stream = Box::pin(self.stream(&body));
 		while let Some(chunk) = stream.next().await {
 			let Ok(chunk) = chunk else {
 				continue;
@@ -109,10 +127,10 @@ impl<'s, S> Request<'s, S> {
 		})
 	}
 
+	#[cfg(not(target_os = "wasi"))]
 	async fn stream(&self) -> io::Result<impl Stream<Item = io::Result<ChatCompletionChunk>>> {
 		let response = Client::new()
 			.post(self.base_url.to_string() + "/v1/chat/completions")
-			.timeout(Duration::MAX)
 			.into_either(self.api_key.is_some())
 			.right_or_else(|req| req.bearer_auth(self.api_key.as_ref().as_slice()[0]))
 			.header(CONTENT_TYPE, "application/json")
@@ -146,6 +164,48 @@ impl<'s, S> Request<'s, S> {
 			});
 
 		Ok(stream)
+	}
+
+	#[cfg(target_os = "wasi")]
+	async fn body(&self) -> io::Result<IncomingBody> {
+		let client = Client::new();
+		let response = Req::post(self.base_url.to_string() + "/v1/chat/completions")
+			.into_either(self.api_key.is_some())
+			.right_or_else(|req| {
+				req.header(
+					AUTHORIZATION,
+					format!("Bearer {}", self.api_key.as_ref().as_slice()[0]),
+				)
+			})
+			.header(CONTENT_TYPE, "application/json")
+			.json(&self.body)
+			.map(|req| client.send(req))
+			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?
+			.await
+			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+		let status = response.status();
+		if !status.is_success() {
+			let resp = response
+				.into_body()
+				.bytes()
+				.await
+				.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+			return Err(io::Error::from(io::Error::new(
+				io::ErrorKind::ConnectionRefused,
+				format!(
+					"Status Code: {}\nResponse: {}",
+					std::str::from_utf8(&resp).unwrap_or(""),
+					status
+				),
+			)));
+		}
+
+		Ok(response.into_body())
+	}
+
+	#[cfg(target_os = "wasi")]
+	fn stream<'b>(&self, body: &'b IncomingBody) -> ChatCompletionStream<'b> {
+		ChatCompletionStream::new(body.as_async_input_stream().unwrap())
 	}
 }
 
@@ -344,3 +404,69 @@ pub struct Function {
 
 /// Tool call arguments
 pub type Arguments = serde_json::Map<String, serde_json::Value>;
+
+#[cfg(target_os = "wasi")]
+struct ChatCompletionStream<'b> {
+	buf: Vec<u8>,
+	inner: &'b AsyncInputStream,
+}
+
+#[cfg(target_os = "wasi")]
+impl<'b> ChatCompletionStream<'b> {
+	fn new(inner: &'b AsyncInputStream) -> Self {
+		ChatCompletionStream {
+			buf: Vec::new(),
+			inner,
+		}
+	}
+
+	async fn next(&mut self) -> Option<io::Result<ChatCompletionChunk>> {
+		self.read_chunk().await.transpose()
+	}
+
+	async fn read_chunk(&mut self) -> io::Result<Option<ChatCompletionChunk>> {
+		while let Some(line) = self.read_line().await? {
+			let line = match line.iter().rposition(|&c| c == b'\n' || c == b'\r') {
+				Some(pos) => &line[..pos],
+				None => &line[..],
+			};
+
+			let Ok(s) = std::str::from_utf8(line) else {
+				continue;
+			};
+			if s.starts_with("[DONE]") {
+				return Ok(None);
+			}
+			let Some(json_start) = s.find('{') else {
+				continue;
+			};
+
+			let chunk_res = serde_json::from_str(&s[json_start..]).map_err(|e| {
+				io::Error::new(io::ErrorKind::InvalidData, format!("Malformed JSON: {}", e))
+			});
+
+			return Some(chunk_res).transpose();
+		}
+		Ok(None)
+	}
+
+	async fn read_line(&mut self) -> io::Result<Option<Vec<u8>>> {
+		loop {
+			if let Some(nl) = self.buf.iter().position(|&c| c == b'\n') {
+				let line = self.buf.drain(..nl + 1).collect::<Vec<_>>();
+				return Ok(Some(line));
+			}
+
+			let mut chunk = [0u8; 1_024];
+			let n = self.inner.read(&mut chunk).await?;
+			if n == 0 {
+				if self.buf.is_empty() {
+					return Ok(None);
+				}
+				let line = self.buf.drain(..).collect::<Vec<_>>();
+				return Ok(Some(line));
+			}
+			self.buf.extend_from_slice(&chunk[..n]);
+		}
+	}
+}
