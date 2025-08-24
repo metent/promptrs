@@ -176,14 +176,14 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 	}
 	let output = quote! {
 		#[allow(non_upper_case_globals)]
-		const #ident: ::promptrs::Tool<'static, #state_ty> = ::promptrs::Tool {
+		#vis const #ident: ::promptrs::Tool<'static, #state_ty> = ::promptrs::Tool {
 			name: #name,
 			description: #description,
 			jsonschema: #jsonschema,
 			call: #call,
 		};
 
-		fn #call(#state_arg _name: &str, arguments: &mut ::promptrs::Arguments) -> ::promptrs::serde_json::Result<String> {
+		#vis fn #call(#state_arg _name: &str, arguments: &mut ::promptrs::Arguments) -> ::promptrs::serde_json::Result<String> {
 			let mut left = arguments.clone();
 			#(#call_stmts)*
 			let result = #fun(#(#args,)*);
