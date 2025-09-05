@@ -1,5 +1,5 @@
 use super::{Delims, Segment};
-use winnow::combinator::{alt, opt, repeat};
+use winnow::combinator::{alt, eof, opt, repeat_till};
 use winnow::error::ParserError;
 use winnow::token::{rest, take_until};
 use winnow::{ModalResult, Parser};
@@ -8,32 +8,35 @@ use winnow::{ModalResult, Parser};
 pub fn parse(input: &mut &str, delims: Option<&Delims>) -> ModalResult<Vec<Segment>> {
 	let mut segments = Vec::new();
 	if let Some(rdelims) = delims.as_ref().map(|del| &del.reasoning) {
-		let reasoning = opt(between(rdelims))
-			.map(|s: Option<&str>| s.map(|s| Segment::Reasoning(s.into())))
+		let reasoning = opt((take_until(0.., rdelims.0.as_str()), between(rdelims)))
+			.map(|s: Option<(_, &str)>| s.map(|(_, s)| Segment::Reasoning(s.into())))
 			.parse_next(input)?;
 		segments.extend(reasoning);
 	}
 
-	match delims.as_ref().and_then(|del| del.content.as_ref()) {
-		Some(adel) => repeat(
+	let (mid, _) = match delims.as_ref().and_then(|del| del.content.as_ref()) {
+		Some(adel) => repeat_till(
 			0..,
 			alt((
 				between(adel).map(|ans| Segment::Answer(ans.into())),
 				take_until(0.., adel.0.as_str()).map(|cmt: &str| Segment::Commentary(cmt.into())),
 				rest.map(|cmt: &str| Segment::Commentary(cmt.into())),
 			)),
+			eof,
 		)
 		.parse_next(input)?,
-		None => repeat(
+		None => repeat_till(
 			0..,
 			alt((
 				between(&("\n```".into(), "\n```".into())).map(parse_block),
 				take_until(0.., "\n```").map(|cmt: &str| Segment::Commentary(cmt.into())),
 				rest.map(|cmt: &str| Segment::Commentary(cmt.into())),
 			)),
+			eof,
 		)
 		.parse_next(input)?,
-	}
+	};
+	segments.extend::<Vec<_>>(mid);
 
 	Ok(segments)
 }
@@ -51,7 +54,6 @@ fn between<'s, E: ParserError<&'s str>>(
 ) -> impl Parser<&'s str, &'s str, E> {
 	|input: &mut &'s str| {
 		let (mut start, mut end) = (start.as_str(), end.as_str());
-		_ = take_until(0.., start).parse_next(input)?;
 		_ = start.parse_next(input)?;
 		let between = alt((take_until(0.., end), rest)).parse_next(input)?;
 		_ = end.parse_next(input)?;
