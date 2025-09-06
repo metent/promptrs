@@ -281,27 +281,17 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 					.map(|handler| |token, is_reasoning| handler(state, token, is_reasoning)),
 			)
 			.await?;
-		let segments = self.parse(completion);
-		debug!("Segments: {segments:#?}");
-		let assistant = segments.iter().fold("".to_string(), |acc, seg| match seg {
-			Segment::Answer(s) | Segment::Commentary(s) => acc + s.as_str() + "\n",
-			Segment::CodeBlock(lang, s) => {
-				acc + "```" + lang.as_ref().map_or("", |s| s.as_str()) + "\n" + s + "\n```\n"
-			}
-			_ => acc,
-		});
-
-		if !assistant.trim().is_empty() {
+		let (assistant, segments) = self.parse_response(completion);
+		if let Some(assistant) = &assistant {
 			self.messages.push(Message::Assistant(assistant.clone()));
 		}
+
 		let old_len = self.messages.len();
-		let tool_calls = segments
-			.into_iter()
-			.flat_map(|seg| match seg {
-				Segment::ToolCall(tc) => tc,
-				_ => vec![],
-			})
-			.collect();
+		let empty = vec![];
+		let tool_calls = segments.iter().flat_map(|seg| match seg {
+			Segment::ToolCall(tc) => tc.iter(),
+			_ => empty.iter(),
+		});
 		let called = self.execute_tools(state, tool_calls);
 		if called {
 			self.push_status(state);
@@ -315,6 +305,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 			nbtc,
 			status: self.status,
 			text: assistant,
+			segments,
 		})
 	}
 
@@ -340,9 +331,9 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		.await
 	}
 
-	fn parse(&self, response: Response) -> Vec<Segment> {
+	fn parse_response(&self, mut response: Response) -> (Option<String>, Vec<Segment>) {
 		let parsed = parse(&mut response.content.as_str(), self.config.delims.as_ref())
-			.unwrap_or(vec![Segment::Commentary(response.content)])
+			.unwrap_or_else(|_| vec![Segment::Commentary(response.content.clone())])
 			.into_iter()
 			.filter({
 				let parse_reasoning = response.reasoning.is_none();
@@ -357,32 +348,49 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		let mut segments = Vec::new();
 		if let Some(reasoning) = response.reasoning {
 			segments.push(Segment::Reasoning(reasoning));
+		} else if let Some(delims) = &self.config.delims {
+			if let Some(start) = response.content.find(&delims.reasoning.1) {
+				response.content = response.content.split_off(start + delims.reasoning.1.len());
+			}
 		}
 		segments.extend(parsed);
 		segments.push(Segment::ToolCall(response.tool_calls));
-		segments
+
+		debug!("Segments: {segments:#?}");
+
+		if !response.content.trim().is_empty() {
+			(Some(response.content), segments)
+		} else {
+			(None, segments)
+		}
 	}
 
-	fn execute_tools(&mut self, state: &mut S, tool_calls: Vec<Function>) -> bool {
+	fn execute_tools<'f>(
+		&mut self,
+		state: &mut S,
+		tool_calls: impl Iterator<Item = &'f Function>,
+	) -> bool {
 		let mut called = false;
-		for Function {
-			name,
-			mut arguments,
-		} in tool_calls
-		{
-			if self.status.as_ref().is_some_and(|s| s.name == name) {
+		for func in tool_calls {
+			if self.status.as_ref().is_some_and(|s| s.name == func.name) {
 				continue;
 			}
+			let mut arguments = func.arguments.clone();
 			let resp = self
 				.tools
 				.iter()
-				.find(|tool| tool.name == name)
+				.find(|tool| tool.name == func.name)
 				.map(|tool| (tool.call)(state, tool.name, &mut arguments))
 				.unwrap_or_else(|| Ok("Function not found.".into()))
 				.unwrap_or_else(|err| err.to_string());
 
-			self.messages
-				.push(Message::ToolCall((Function { name, arguments }, resp)));
+			self.messages.push(Message::ToolCall((
+				Function {
+					name: func.name.clone(),
+					arguments,
+				},
+				resp,
+			)));
 			called = true;
 		}
 		called
@@ -466,7 +474,9 @@ pub struct ReceivedState<'c, 's, S> {
 	nbtc: usize,
 	status: Option<Tool<'s, S>>,
 	/// Assistant response with reasoning block removed
-	pub text: String,
+	pub text: Option<String>,
+	/// Parsed segments of assistant response
+	pub segments: Vec<Segment>,
 }
 
 impl<'c, 's, T> ReceivedState<'c, 's, T> {
