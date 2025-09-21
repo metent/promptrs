@@ -370,8 +370,8 @@ pub struct ChatCompletionChunk {
 
 #[derive(Debug, Deserialize)]
 struct Choice {
+	#[serde(default)]
 	index: usize,
-	#[serde(alias = "message")]
 	delta: Delta,
 }
 

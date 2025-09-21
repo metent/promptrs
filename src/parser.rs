@@ -19,7 +19,7 @@ pub fn parse(input: &mut &str, delims: Option<&Delims>) -> ModalResult<Vec<Segme
 			0..,
 			alt((
 				between(adel).map(|ans| Segment::Answer(ans.into())),
-				take_until(0.., adel.0.as_str()).map(|cmt: &str| Segment::Commentary(cmt.into())),
+				take_until(1.., adel.0.as_str()).map(|cmt: &str| Segment::Commentary(cmt.into())),
 				rest.map(|cmt: &str| Segment::Commentary(cmt.into())),
 			)),
 			eof,
@@ -29,7 +29,7 @@ pub fn parse(input: &mut &str, delims: Option<&Delims>) -> ModalResult<Vec<Segme
 			0..,
 			alt((
 				between(&("\n```".into(), "\n```".into())).map(parse_block),
-				take_until(0.., "\n```").map(|cmt: &str| Segment::Commentary(cmt.into())),
+				take_until(1.., "\n```").map(|cmt: &str| Segment::Commentary(cmt.into())),
 				rest.map(|cmt: &str| Segment::Commentary(cmt.into())),
 			)),
 			eof,
