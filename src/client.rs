@@ -14,6 +14,8 @@ use serde_json::json;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::io;
+#[cfg(not(target_os = "wasi"))]
+use std::time::Duration;
 
 #[cfg(target_os = "wasi")]
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -137,6 +139,7 @@ impl<'s, S> Request<'s, S> {
 			.right_or_else(|req| req.bearer_auth(self.api_key.as_ref().as_slice()[0]))
 			.header(CONTENT_TYPE, "application/json")
 			.json(&self.body)
+			.timeout(Duration::MAX)
 			.send()
 			.await
 			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
