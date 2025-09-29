@@ -362,7 +362,11 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		debug!("Segments: {segments:#?}");
 
 		if !response.content.trim().is_empty() {
-			(Some(response.content), segments)
+			let reasoning = self.config.delims.as_ref().map_or(("", ""), |delims| {
+				(&delims.reasoning.0, &delims.reasoning.1)
+			});
+			let assistant = format!("{}{}{}", reasoning.0, reasoning.1, response.content);
+			(Some(assistant), segments)
 		} else {
 			(None, segments)
 		}
