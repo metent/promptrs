@@ -228,8 +228,12 @@ impl<S> Serialize for Params<'_, S> {
 	fn serialize<R: Serializer>(&self, serializer: R) -> Result<R::Ok, R::Error> {
 		let mut map = serializer.serialize_map(None)?;
 		map.serialize_entry("model", self.model)?;
-		map.serialize_entry("temperature", &self.temperature)?;
-		map.serialize_entry("top_p", &self.top_p)?;
+		if self.temperature.is_some() {
+			map.serialize_entry("temperature", &self.temperature)?;
+		}
+		if self.top_p.is_some() {
+			map.serialize_entry("top_p", &self.top_p)?;
+		}
 		map.serialize_entry("messages", &self.inner)?;
 		let tools = self.inner.tools.iter().chain(self.inner.status.iter());
 		map.serialize_entry("tools", &tools.collect::<Vec<_>>())?;
