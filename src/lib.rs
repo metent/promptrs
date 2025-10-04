@@ -186,7 +186,7 @@ pub struct InitState<'c, 's, S> {
 }
 
 impl<'c, 's, S> InitState<'c, 's, S> {
-	/// Add a first user message and turn the builder into a *SendState*.
+	/// Add a first user message with text and turn the builder into a *SendState*.
 	///
 	/// This moves the system prompt into the messages array and returns
 	/// a new struct that is ready for extra messages and token callbacks.
@@ -196,6 +196,44 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 			.into_iter()
 			.map(Message::System)
 			.chain([Message::User(vec![Part::Text(user)])])
+			.collect();
+		SendState {
+			config: self.config,
+			messages,
+			tools: self.tools,
+			status: self.status,
+		}
+	}
+
+	/// Add a first user message with image and turn the builder into a *SendState*.
+	///
+	/// This moves the system prompt into the messages array and returns
+	/// a new struct that is ready for extra messages and token callbacks.
+	pub fn image(self, url: String) -> SendState<'c, 's, S> {
+		let messages = self
+			.system
+			.into_iter()
+			.map(Message::System)
+			.chain([Message::User(vec![Part::Image(url)])])
+			.collect();
+		SendState {
+			config: self.config,
+			messages,
+			tools: self.tools,
+			status: self.status,
+		}
+	}
+
+	/// Add an arbitrary list of messages and turn the builder into a *SendState*.
+	///
+	/// This moves the system prompt into the messages array and returns
+	/// a new struct that is ready for extra messages and token callbacks.
+	pub fn history(self, messages: impl IntoIterator<Item = Message>) -> SendState<'c, 's, S> {
+		let messages = self
+			.system
+			.into_iter()
+			.map(Message::System)
+			.chain(messages)
 			.collect();
 		SendState {
 			config: self.config,
@@ -234,6 +272,13 @@ pub struct SendState<'c, 's, S> {
 }
 
 impl<'c, 's, S> SendState<'c, 's, S> {
+	/// Add text to the last user message.
+	pub fn user(&mut self, text: String) {
+		if let Some(Message::User(user)) = self.messages.last_mut() {
+			user.push(Part::Text(text));
+		}
+	}
+
 	/// Add an image to the last user message.
 	pub fn image(&mut self, url: String) {
 		if let Some(Message::User(user)) = self.messages.last_mut() {
@@ -245,7 +290,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	///
 	/// Useful for bulk‑adding system, user or assistant messages.
 	/// Adds additional messages to the history
-	pub fn messages(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
+	pub fn history(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
 		self.messages.extend(messages);
 		self
 	}
