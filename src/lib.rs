@@ -64,7 +64,7 @@ mod pruner;
 
 pub use client::{Arguments, Function, Message, Segment};
 use client::{InnerParams, Params, Request, Response};
-use log::debug;
+use log::{debug, warn};
 use parser::parse;
 use pruner::prune;
 pub use serde;
@@ -311,9 +311,9 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 
 	async fn completion(
 		&self,
-		on_token: Option<impl FnMut(String, bool) -> String>,
+		mut on_token: Option<impl FnMut(String, bool) -> String>,
 	) -> io::Result<Response> {
-		Request {
+		let request = Request {
 			api_key: &self.config.api_key,
 			base_url: &self.config.base_url,
 			body: Params {
@@ -329,9 +329,21 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 				stream: true,
 				extra: &self.config.extra,
 			},
+		};
+
+		let mut attempts = 3;
+		loop {
+			match request.chat_completion(&mut on_token).await {
+				Ok(completion) => return Ok(completion),
+				Err(err) => {
+					attempts -= 1;
+					warn!("{err}");
+					if attempts == 0 {
+						return Err(err);
+					}
+				}
+			}
 		}
-		.chat_completion(on_token)
-		.await
 	}
 
 	fn parse_response(&self, mut response: Response) -> (Option<String>, Vec<Segment>) {

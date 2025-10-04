@@ -39,7 +39,7 @@ impl<'s, S> Request<'s, S> {
 	/// Sends the chat completion request and processes streaming response.
 	pub async fn chat_completion(
 		&self,
-		mut on_token: Option<impl FnMut(String, bool) -> String>,
+		on_token: &mut Option<impl FnMut(String, bool) -> String>,
 	) -> io::Result<Response> {
 		let mut buf = String::new();
 		let mut rbuf = String::new();
