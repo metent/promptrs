@@ -256,13 +256,18 @@ impl<S> Serialize for InnerParams<'_, S> {
 		let mut messages = messages.iter();
 		let mut curr = messages.next();
 
+		#[derive(Serialize)]
+		#[serde(tag = "role", rename = "user")]
+		struct User<'s> {
+			content: &'s [Part],
+		}
+
 		if let (Some(Message::System(system)), SystemPromptMode::User) = (curr, mode) {
-			let mut content = system.clone();
+			let mut content = vec![Part::Text(system.clone())];
 			if let Some(Message::User(user)) = curr {
-				content.push_str("\n\n");
-				content.push_str(user);
+				content.extend(user.iter().cloned());
 			}
-			seq.serialize_element(&HashMap::from([("role", "user"), ("content", &content)]))?;
+			seq.serialize_element(&User { content: &content })?;
 			_ = messages.next();
 			curr = messages.next();
 		}
@@ -292,14 +297,22 @@ impl<S> Serialize for InnerParams<'_, S> {
 
 			let Some(message) = curr else { break };
 
-			let (role, content) = match message {
-				Message::System(content) => ("user", content),
-				Message::User(content) => ("user", content),
-				Message::Assistant(content) => ("assistant", content),
+			match message {
+				Message::System(content) => {
+					seq.serialize_element(&HashMap::from([
+						("role", "system"),
+						("content", &content),
+					]))?;
+				}
+				Message::User(content) => seq.serialize_element(&User { content: &content })?,
+				Message::Assistant(content) => {
+					seq.serialize_element(&HashMap::from([
+						("role", "assistant"),
+						("content", &content),
+					]))?;
+				}
 				_ => unreachable!(),
-			};
-			let map = HashMap::from([("role", role), ("content", content)]);
-			seq.serialize_element(&map)?;
+			}
 
 			curr = messages.next();
 		}
@@ -332,13 +345,39 @@ pub enum Message {
 	/// Instructions for assistant behavior
 	System(String),
 	/// Direct user messages
-	User(String),
+	User(Vec<Part>),
 	/// LLM responses without reasoning
 	Assistant(String),
 	/// Tool call identifier, arguments and response
 	ToolCall((Function, String)),
 	/// Status tool call identifer and response
 	Status((Function, String)),
+}
+
+#[derive(Clone, Debug)]
+/// Represents part of a message
+pub enum Part {
+	/// Text Content
+	Text(String),
+	/// Image Url
+	Image(String),
+}
+
+impl Serialize for Part {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		let mut map = serializer.serialize_map(Some(2))?;
+		match self {
+			Part::Text(text) => {
+				map.serialize_entry("type", "text")?;
+				map.serialize_entry("text", text)?;
+			}
+			Part::Image(url) => {
+				map.serialize_entry("type", "image_url")?;
+				map.serialize_entry("image_url", &HashMap::from([("url", url)]))?;
+			}
+		}
+		map.end()
+	}
 }
 
 /// Response structure containing AI output and tool calls.

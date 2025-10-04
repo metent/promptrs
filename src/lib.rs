@@ -62,7 +62,7 @@ mod client;
 mod parser;
 mod pruner;
 
-pub use client::{Arguments, Function, Message, Segment};
+pub use client::{Arguments, Function, Message, Part, Segment};
 use client::{InnerParams, Params, Request, Response};
 use log::{debug, warn};
 use parser::parse;
@@ -195,7 +195,7 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 			.system
 			.into_iter()
 			.map(Message::System)
-			.chain([Message::User(user)])
+			.chain([Message::User(vec![Part::Text(user)])])
 			.collect();
 		SendState {
 			config: self.config,
@@ -234,6 +234,13 @@ pub struct SendState<'c, 's, S> {
 }
 
 impl<'c, 's, S> SendState<'c, 's, S> {
+	/// Add an image to the last user message.
+	pub fn image(&mut self, url: String) {
+		if let Some(Message::User(user)) = self.messages.last_mut() {
+			user.push(Part::Image(url));
+		}
+	}
+
 	/// Add an arbitrary list of messages to the history.
 	///
 	/// Useful for bulk‑adding system, user or assistant messages.
@@ -501,7 +508,10 @@ pub struct ReceivedState<'c, 's, S> {
 impl<'c, 's, T> ReceivedState<'c, 's, T> {
 	/// Continues conversation with new user input
 	pub fn user(mut self, user: Option<String>) -> SendState<'c, 's, T> {
-		self.messages.extend(user.into_iter().map(Message::User));
+		self.messages.extend(
+			user.into_iter()
+				.map(|msg| Message::User(vec![Part::Text(msg)])),
+		);
 		self.messages = prune(self.messages, self.config.char_limit);
 		SendState {
 			config: self.config,
