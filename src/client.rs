@@ -1,32 +1,24 @@
 //! Core client implementation for chat completions.
 use super::{SystemPromptMode, Tool};
-use either::IntoEither;
-#[cfg(not(target_os = "wasi"))]
-use futures_util::{AsyncBufReadExt, Stream, StreamExt, TryStreamExt};
 use log::info;
-#[cfg(not(target_os = "wasi"))]
-use reqwest::Client;
-#[cfg(not(target_os = "wasi"))]
-use reqwest::header::CONTENT_TYPE;
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, ClientConnection, RootCertStore};
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, Read, Write};
+use std::sync::Arc;
 #[cfg(not(target_os = "wasi"))]
-use std::time::Duration;
-
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(not(target_os = "wasi"))]
+use tokio::net::TcpStream;
+use url::Url;
 #[cfg(target_os = "wasi")]
-use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use wstd::io::{AsyncRead, AsyncWrite};
 #[cfg(target_os = "wasi")]
-use wstd::http::body::IncomingBody;
-#[cfg(target_os = "wasi")]
-use wstd::http::request::JsonRequest;
-#[cfg(target_os = "wasi")]
-use wstd::http::{Client, Request as Req};
-#[cfg(target_os = "wasi")]
-use wstd::io::{AsyncInputStream, AsyncRead as _};
+use wstd::net::TcpStream;
 
 /// Represents a chat completion request configuration.
 pub struct Request<'s, S> {
@@ -46,17 +38,46 @@ impl<'s, S> Request<'s, S> {
 		let mut tool_calls = Vec::new();
 		let mut content = String::new();
 		let mut reasoning = String::new();
-		#[cfg(not(target_os = "wasi"))]
-		let mut stream = Box::pin(self.stream().await?);
-		#[cfg(target_os = "wasi")]
-		let body = self.body().await?;
-		#[cfg(target_os = "wasi")]
-		let mut stream = Box::pin(self.stream(&body));
-		while let Some(chunk) = stream.next().await {
-			let Ok(chunk) = chunk else {
+
+		let url = Url::parse(self.base_url)
+			.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+		let host = url
+			.host_str()
+			.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing host"))?;
+		let port = url.port_or_known_default().ok_or_else(|| {
+			io::Error::new(
+				io::ErrorKind::InvalidInput,
+				"could not determine port from URL",
+			)
+		})?;
+
+		let mut tls = TlsStream::connect(host, port).await?;
+		tls.finish_handshake().await?;
+
+		let body_bytes = serde_json::to_vec(&self.body)?;
+		let request_bytes =
+			build_http_request(host, "/v1/chat/completions", &body_bytes, self.api_key);
+		tls.write_all(&request_bytes).await?;
+
+		while let Some(line) = tls.read_line().await? {
+			let trimmed = line.trim();
+
+			if trimmed.is_empty() {
+				continue;
+			}
+
+			let Some(raw) = trimmed.strip_prefix("data:") else {
 				continue;
 			};
+			let raw = raw.trim();
 
+			if raw == "[DONE]" || raw.is_empty() {
+				break;
+			}
+
+			let json_obj = serde_json::from_str::<ChatCompletionChunk>(raw).map_err(|e| {
+				io::Error::new(io::ErrorKind::InvalidData, format!("JSON parse: {e}"))
+			})?;
 			let Some(Choice {
 				index,
 				delta:
@@ -65,7 +86,7 @@ impl<'s, S> Request<'s, S> {
 						reasoning_content,
 						tool_calls: tcs,
 					},
-			}) = chunk.choices.into_iter().next()
+			}) = json_obj.choices.into_iter().next()
 			else {
 				continue;
 			};
@@ -129,88 +150,6 @@ impl<'s, S> Request<'s, S> {
 				})
 				.collect(),
 		})
-	}
-
-	#[cfg(not(target_os = "wasi"))]
-	async fn stream(&self) -> io::Result<impl Stream<Item = io::Result<ChatCompletionChunk>>> {
-		let response = Client::new()
-			.post(self.base_url.to_string() + "/v1/chat/completions")
-			.into_either(self.api_key.is_some())
-			.right_or_else(|req| req.bearer_auth(self.api_key.as_ref().as_slice()[0]))
-			.header(CONTENT_TYPE, "application/json")
-			.json(&self.body)
-			.timeout(Duration::MAX)
-			.send()
-			.await
-			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-		let status = response.status();
-		if !status.is_success() {
-			let resp = response
-				.text()
-				.await
-				.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-			return Err(io::Error::from(io::Error::new(
-				io::ErrorKind::ConnectionRefused,
-				format!("Status Code: {}\nResponse: {resp}", status),
-			)));
-		}
-		let stream = response
-			.bytes_stream()
-			.map(|x| x.map_err(|err| io::Error::new(io::ErrorKind::Other, err)))
-			.into_async_read()
-			.lines()
-			.filter_map(async |l| {
-				let s = l.ok()?;
-				(!s.contains("[DONE]")).then_some(())?;
-				let i = s.find('{')?;
-				Some(serde_json::from_str(&s[i..]).map_err(|err| {
-					io::Error::new(io::ErrorKind::InvalidData, format!("Malformed JSON: {err}"))
-				}))
-			});
-
-		Ok(stream)
-	}
-
-	#[cfg(target_os = "wasi")]
-	async fn body(&self) -> io::Result<IncomingBody> {
-		let client = Client::new();
-		let response = Req::post(self.base_url.to_string() + "/v1/chat/completions")
-			.into_either(self.api_key.is_some())
-			.right_or_else(|req| {
-				req.header(
-					AUTHORIZATION,
-					format!("Bearer {}", self.api_key.as_ref().as_slice()[0]),
-				)
-			})
-			.header(CONTENT_TYPE, "application/json")
-			.json(&self.body)
-			.map(|req| client.send(req))
-			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?
-			.await
-			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-		let status = response.status();
-		if !status.is_success() {
-			let resp = response
-				.into_body()
-				.bytes()
-				.await
-				.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-			return Err(io::Error::from(io::Error::new(
-				io::ErrorKind::ConnectionRefused,
-				format!(
-					"Status Code: {}\nResponse: {}",
-					std::str::from_utf8(&resp).unwrap_or(""),
-					status
-				),
-			)));
-		}
-
-		Ok(response.into_body())
-	}
-
-	#[cfg(target_os = "wasi")]
-	fn stream<'b>(&self, body: &'b IncomingBody) -> ChatCompletionStream<'b> {
-		ChatCompletionStream::new(body.as_async_input_stream().unwrap())
 	}
 }
 
@@ -453,68 +392,140 @@ pub struct Function {
 /// Tool call arguments
 pub type Arguments = serde_json::Map<String, serde_json::Value>;
 
-#[cfg(target_os = "wasi")]
-struct ChatCompletionStream<'b> {
-	buf: Vec<u8>,
-	inner: &'b AsyncInputStream,
+struct TlsStream {
+	conn: ClientConnection,
+	tcp: TcpStream,
+	plain_buf: Vec<u8>,
 }
 
-#[cfg(target_os = "wasi")]
-impl<'b> ChatCompletionStream<'b> {
-	fn new(inner: &'b AsyncInputStream) -> Self {
-		ChatCompletionStream {
-			buf: Vec::new(),
-			inner,
+impl TlsStream {
+	async fn connect(host: &str, port: u16) -> io::Result<Self> {
+		let root_store = RootCertStore {
+			roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+		};
+
+		let mut config = ClientConfig::builder()
+			.with_root_certificates(root_store)
+			.with_no_client_auth();
+		config.alpn_protocols = vec![b"http/1.1".to_vec()];
+
+		let server_name = ServerName::try_from(host.to_string())
+			.map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid hostname"))?;
+
+		let addr = format!("{}:{}", host, port);
+		let tcp = TcpStream::connect(&addr).await?;
+
+		let conn = ClientConnection::new(Arc::new(config), server_name)
+			.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))?;
+
+		Ok(Self {
+			conn,
+			tcp,
+			plain_buf: Vec::new(),
+		})
+	}
+
+	async fn finish_handshake(&mut self) -> io::Result<()> {
+		let mut outgoing = Vec::new();
+		self.conn.write_tls(&mut outgoing)?;
+		if !outgoing.is_empty() {
+			self.tcp.write_all(&outgoing).await?;
 		}
-	}
 
-	async fn next(&mut self) -> Option<io::Result<ChatCompletionChunk>> {
-		self.read_chunk().await.transpose()
-	}
-
-	async fn read_chunk(&mut self) -> io::Result<Option<ChatCompletionChunk>> {
-		while let Some(line) = self.read_line().await? {
-			let line = match line.iter().rposition(|&c| c == b'\n' || c == b'\r') {
-				Some(pos) => &line[..pos],
-				None => &line[..],
-			};
-
-			let Ok(s) = std::str::from_utf8(line) else {
-				continue;
-			};
-			if s.starts_with("[DONE]") {
-				return Ok(None);
-			}
-			let Some(json_start) = s.find('{') else {
-				continue;
-			};
-
-			let chunk_res = serde_json::from_str(&s[json_start..]).map_err(|e| {
-				io::Error::new(io::ErrorKind::InvalidData, format!("Malformed JSON: {}", e))
-			});
-
-			return Some(chunk_res).transpose();
-		}
-		Ok(None)
-	}
-
-	async fn read_line(&mut self) -> io::Result<Option<Vec<u8>>> {
-		loop {
-			if let Some(nl) = self.buf.iter().position(|&c| c == b'\n') {
-				let line = self.buf.drain(..nl + 1).collect::<Vec<_>>();
-				return Ok(Some(line));
-			}
-
-			let mut chunk = [0u8; 1_024];
-			let n = self.inner.read(&mut chunk).await?;
+		while self.conn.is_handshaking() {
+			let mut buf = [0u8; 4096];
+			let n = self.tcp.read(&mut buf).await?;
 			if n == 0 {
-				if self.buf.is_empty() {
-					return Ok(None);
-				}
-				let line = self.buf.drain(..).collect::<Vec<_>>();
+				return Err(io::Error::new(
+					io::ErrorKind::UnexpectedEof,
+					"hand‑shake aborted – server closed connection",
+				));
+			}
+
+			let mut cursor = std::io::Cursor::new(&buf[..n]);
+			self.conn.read_tls(&mut cursor)?;
+			self.conn
+				.process_new_packets()
+				.map_err(|err| io::Error::other(err))?;
+
+			let mut pending = Vec::new();
+			self.conn.write_tls(&mut pending)?;
+			if !pending.is_empty() {
+				self.tcp.write_all(&pending).await?;
+			}
+		}
+
+		Ok(())
+	}
+
+	async fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
+		self.conn.writer().write_all(data)?;
+
+		let mut tls_buf = Vec::new();
+		self.conn.write_tls(&mut tls_buf)?;
+
+		self.tcp.write_all(&tls_buf).await?;
+		Ok(())
+	}
+
+	async fn read_line(&mut self) -> io::Result<Option<String>> {
+		loop {
+			if let Some(pos) = self.plain_buf.iter().position(|&b| b == b'\n') {
+				let line_bytes = self.plain_buf.drain(..=pos).collect::<Vec<_>>();
+				let line = String::from_utf8_lossy(&line_bytes).to_string();
 				return Ok(Some(line));
 			}
-			self.buf.extend_from_slice(&chunk[..n]);
+
+			let mut net_buf = [0u8; 1024];
+			let n = self.tcp.read(&mut net_buf).await?;
+			if n == 0 {
+				if self.plain_buf.is_empty() {
+					return Ok(None);
+				} else {
+					let line_bytes = std::mem::take(&mut self.plain_buf);
+					let line = String::from_utf8_lossy(&line_bytes).to_string();
+					return Ok(Some(line));
+				}
+			}
+
+			let mut cursor = std::io::Cursor::new(&net_buf[..n]);
+			self.conn.read_tls(&mut cursor)?;
+			self.conn
+				.process_new_packets()
+				.map_err(|err| io::Error::other(err))?;
+
+			let mut tmp = [0u8; 256];
+			let mut plain = Vec::new();
+			loop {
+				match self.conn.reader().read(&mut tmp) {
+					Ok(0) => break,
+					Ok(k) => plain.extend_from_slice(&tmp[..k]),
+					Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+					Err(e) => return Err(e),
+				}
+			}
+			self.plain_buf.extend_from_slice(&plain);
 		}
 	}
+}
+
+fn build_http_request(host: &str, path: &str, body: &[u8], api_key: &Option<String>) -> Vec<u8> {
+	let mut req = format!(
+		"POST {path} HTTP/1.1\r\n\
+		Host: {host}\r\n\
+		Content-Type: application/json\r\n\
+		Accept: text/event-stream\r\n\
+		Content-Length: {len}\r\n\
+		Connection: close\r\n",
+		host = host,
+		path = path,
+		len = body.len()
+	);
+	if let Some(k) = api_key {
+		req.push_str(&format!("Authorization: Bearer {k}\r\n"));
+	}
+	req.push_str("\r\n");
+	let mut buf = req.into_bytes();
+	buf.extend_from_slice(body);
+	buf
 }
