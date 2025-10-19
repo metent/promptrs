@@ -415,8 +415,9 @@ impl TlsStream {
 		let addr = format!("{}:{}", host, port);
 		let tcp = TcpStream::connect(&addr).await?;
 
-		let conn = ClientConnection::new(Arc::new(config), server_name)
+		let mut conn = ClientConnection::new(Arc::new(config), server_name)
 			.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))?;
+		conn.set_buffer_limit(Some(1048576));
 
 		Ok(Self {
 			conn,
