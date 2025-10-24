@@ -1,24 +1,14 @@
 //! Core client implementation for chat completions.
 use super::{SystemPromptMode, Tool};
+use crate::tls::TlsStream;
 use log::info;
-use rustls::pki_types::ServerName;
-use rustls::{ClientConfig, ClientConnection, RootCertStore};
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
-use std::sync::Arc;
-#[cfg(not(target_os = "wasi"))]
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-#[cfg(not(target_os = "wasi"))]
-use tokio::net::TcpStream;
+use std::io;
 use url::Url;
-#[cfg(target_os = "wasi")]
-use wstd::io::{AsyncRead, AsyncWrite};
-#[cfg(target_os = "wasi")]
-use wstd::net::TcpStream;
 
 /// Represents a chat completion request configuration.
 pub struct Request<'s, S> {
@@ -52,7 +42,6 @@ impl<'s, S> Request<'s, S> {
 		})?;
 
 		let mut tls = TlsStream::connect(host, port).await?;
-		tls.finish_handshake().await?;
 
 		let body_bytes = serde_json::to_vec(&self.body)?;
 		let request_bytes =
@@ -391,124 +380,6 @@ pub struct Function {
 
 /// Tool call arguments
 pub type Arguments = serde_json::Map<String, serde_json::Value>;
-
-struct TlsStream {
-	conn: ClientConnection,
-	tcp: TcpStream,
-	plain_buf: Vec<u8>,
-}
-
-impl TlsStream {
-	async fn connect(host: &str, port: u16) -> io::Result<Self> {
-		let root_store = RootCertStore {
-			roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-		};
-
-		let mut config = ClientConfig::builder()
-			.with_root_certificates(root_store)
-			.with_no_client_auth();
-		config.alpn_protocols = vec![b"http/1.1".to_vec()];
-
-		let server_name = ServerName::try_from(host.to_string())
-			.map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid hostname"))?;
-
-		let addr = format!("{}:{}", host, port);
-		let tcp = TcpStream::connect(&addr).await?;
-
-		let mut conn = ClientConnection::new(Arc::new(config), server_name)
-			.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))?;
-		conn.set_buffer_limit(Some(1048576));
-
-		Ok(Self {
-			conn,
-			tcp,
-			plain_buf: Vec::new(),
-		})
-	}
-
-	async fn finish_handshake(&mut self) -> io::Result<()> {
-		let mut outgoing = Vec::new();
-		self.conn.write_tls(&mut outgoing)?;
-		if !outgoing.is_empty() {
-			self.tcp.write_all(&outgoing).await?;
-		}
-
-		while self.conn.is_handshaking() {
-			let mut buf = [0u8; 4096];
-			let n = self.tcp.read(&mut buf).await?;
-			if n == 0 {
-				return Err(io::Error::new(
-					io::ErrorKind::UnexpectedEof,
-					"hand‑shake aborted – server closed connection",
-				));
-			}
-
-			let mut cursor = std::io::Cursor::new(&buf[..n]);
-			self.conn.read_tls(&mut cursor)?;
-			self.conn
-				.process_new_packets()
-				.map_err(|err| io::Error::other(err))?;
-
-			let mut pending = Vec::new();
-			self.conn.write_tls(&mut pending)?;
-			if !pending.is_empty() {
-				self.tcp.write_all(&pending).await?;
-			}
-		}
-
-		Ok(())
-	}
-
-	async fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
-		self.conn.writer().write_all(data)?;
-
-		let mut tls_buf = Vec::new();
-		self.conn.write_tls(&mut tls_buf)?;
-
-		self.tcp.write_all(&tls_buf).await?;
-		Ok(())
-	}
-
-	async fn read_line(&mut self) -> io::Result<Option<String>> {
-		loop {
-			if let Some(pos) = self.plain_buf.iter().position(|&b| b == b'\n') {
-				let line_bytes = self.plain_buf.drain(..=pos).collect::<Vec<_>>();
-				let line = String::from_utf8_lossy(&line_bytes).to_string();
-				return Ok(Some(line));
-			}
-
-			let mut net_buf = [0u8; 1024];
-			let n = self.tcp.read(&mut net_buf).await?;
-			if n == 0 {
-				if self.plain_buf.is_empty() {
-					return Ok(None);
-				} else {
-					let line_bytes = std::mem::take(&mut self.plain_buf);
-					let line = String::from_utf8_lossy(&line_bytes).to_string();
-					return Ok(Some(line));
-				}
-			}
-
-			let mut cursor = std::io::Cursor::new(&net_buf[..n]);
-			self.conn.read_tls(&mut cursor)?;
-			self.conn
-				.process_new_packets()
-				.map_err(|err| io::Error::other(err))?;
-
-			let mut tmp = [0u8; 256];
-			let mut plain = Vec::new();
-			loop {
-				match self.conn.reader().read(&mut tmp) {
-					Ok(0) => break,
-					Ok(k) => plain.extend_from_slice(&tmp[..k]),
-					Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-					Err(e) => return Err(e),
-				}
-			}
-			self.plain_buf.extend_from_slice(&plain);
-		}
-	}
-}
 
 fn build_http_request(host: &str, path: &str, body: &[u8], api_key: &Option<String>) -> Vec<u8> {
 	let mut req = format!(

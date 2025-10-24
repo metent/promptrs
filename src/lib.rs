@@ -58,14 +58,14 @@
 //! }
 //! ```
 
-mod client;
+mod openai;
 mod parser;
 mod pruner;
 mod tls;
 
-pub use client::{Arguments, Function, Message, Part, Segment};
-use client::{InnerParams, Params, Request, Response};
 use log::{debug, warn};
+pub use openai::{Arguments, Function, Message, Part, Segment};
+use openai::{InnerParams, Params, Request, Response};
 use parser::parse;
 use pruner::prune;
 pub use serde;
