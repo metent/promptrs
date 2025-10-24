@@ -1,4 +1,4 @@
-use crate::client::Function;
+use crate::openai::Function;
 
 use super::Message;
 

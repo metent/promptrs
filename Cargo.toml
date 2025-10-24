@@ -23,5 +23,5 @@ url = "2.5.7"
 tokio = { version = "1.48.0", features = ["net", "io-util"] }
 
 [target.'cfg(target_os = "wasi")'.dependencies]
-wstd = { path = "../wstd" }
+wstd = "0.6.1"
 wit-bindgen-rt = { version = "0.44.0", features = ["bitflags"] }

@@ -1,6 +1,6 @@
 //! Core client implementation for chat completions.
 use super::{SystemPromptMode, Tool};
-use crate::tls::TlsStream;
+use crate::https::{TlsStream, build_http_request};
 use log::info;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize, Serializer};
@@ -44,8 +44,14 @@ impl<'s, S> Request<'s, S> {
 		let mut tls = TlsStream::connect(host, port).await?;
 
 		let body_bytes = serde_json::to_vec(&self.body)?;
-		let request_bytes =
-			build_http_request(host, "/v1/chat/completions", &body_bytes, self.api_key);
+		let request_bytes = build_http_request(
+			"POST",
+			host,
+			"/v1/chat/completions",
+			&body_bytes,
+			&[],
+			self.api_key.as_ref().map(|k| k.as_str()),
+		);
 		tls.write_all(&request_bytes).await?;
 
 		while let Some(line) = tls.read_line().await? {
@@ -380,24 +386,3 @@ pub struct Function {
 
 /// Tool call arguments
 pub type Arguments = serde_json::Map<String, serde_json::Value>;
-
-fn build_http_request(host: &str, path: &str, body: &[u8], api_key: &Option<String>) -> Vec<u8> {
-	let mut req = format!(
-		"POST {path} HTTP/1.1\r\n\
-		Host: {host}\r\n\
-		Content-Type: application/json\r\n\
-		Accept: text/event-stream\r\n\
-		Content-Length: {len}\r\n\
-		Connection: close\r\n",
-		host = host,
-		path = path,
-		len = body.len()
-	);
-	if let Some(k) = api_key {
-		req.push_str(&format!("Authorization: Bearer {k}\r\n"));
-	}
-	req.push_str("\r\n");
-	let mut buf = req.into_bytes();
-	buf.extend_from_slice(body);
-	buf
-}
