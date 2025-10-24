@@ -61,6 +61,7 @@
 mod client;
 mod parser;
 mod pruner;
+mod tls;
 
 pub use client::{Arguments, Function, Message, Part, Segment};
 use client::{InnerParams, Params, Request, Response};
