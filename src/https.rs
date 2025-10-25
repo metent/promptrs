@@ -24,9 +24,10 @@ pub struct TlsStream {
 impl TlsStream {
 	/// Create and immediately perform the TLS handshake.
 	pub async fn connect(host: &str, port: u16) -> io::Result<Self> {
-		let root_store = RootCertStore {
-			roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-		};
+		let mut root_store = RootCertStore::empty();
+		for cert in rustls_native_certs::load_native_certs().certs {
+			root_store.add(cert).map_err(io::Error::other)?;
+		}
 
 		let mut cfg = ClientConfig::builder()
 			.with_root_certificates(root_store)
