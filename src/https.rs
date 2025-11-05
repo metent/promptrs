@@ -147,7 +147,7 @@ pub fn build_http_request(
 		req.push_str(&format!("{k}: {v}\r\n"));
 	}
 	if let Some(b) = bearer {
-		req.push_str(&format!("Authorization: {b}\r\n"));
+		req.push_str(&format!("Authorization: Bearer {b}\r\n"));
 	}
 	req.push_str(&format!("Content-Length: {}\r\n\r\n", body.len()));
 	req.into_bytes()
