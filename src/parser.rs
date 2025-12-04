@@ -14,6 +14,14 @@ pub fn parse(input: &mut &str, delims: Option<&Delims>) -> ModalResult<Vec<Segme
 		segments.extend(reasoning);
 	}
 
+	let start = match delims.as_ref().and_then(|del| del.content.as_ref()) {
+		Some(adel) => {
+			opt(between(adel).map(|ans| Segment::Answer(ans.into()))).parse_next(input)?
+		}
+		None => opt(between(&("```".into(), "\n```".into())).map(parse_block)).parse_next(input)?,
+	};
+	segments.extend(start);
+
 	let (mid, _) = match delims.as_ref().and_then(|del| del.content.as_ref()) {
 		Some(adel) => repeat_till(
 			0..,
