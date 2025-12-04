@@ -107,12 +107,18 @@ pub struct UserConfig {
 	/// Delimiters for assistant content
 	pub delims: Option<Delims>,
 	/// Whether the system prompt is sent as a system message or as part of the first user message.
+	#[serde(default)]
 	pub mode: SystemPromptMode,
 	/// Maximum allowed message history size in bytes
+	#[serde(default = "default_char_limit")]
 	pub char_limit: u64,
 	/// Additional chat completion request parameters
 	#[serde(default)]
 	pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+fn default_char_limit() -> u64 {
+	u64::MAX
 }
 
 impl UserConfig {
