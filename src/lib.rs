@@ -129,13 +129,15 @@ impl UserConfig {
 
 	/// Start a workflow by adding a system prompt.  The returned `InitState` holds the
 	/// configuration, the system message (if any) and an empty tool list.
-	pub fn system<S>(&self, system: Option<String>) -> InitState<'_, '_, S> {
+	pub fn system<S, R>(&self, system: Option<String>) -> InitState<'_, '_, S, R> {
 		InitState {
 			config: self,
 			system,
 			tools: Vec::new(),
 			mcps: Vec::new(),
 			status: None,
+			responder: None,
+			tries: 1,
 		}
 	}
 }
@@ -189,20 +191,25 @@ impl UserConfigBuilder {
 }
 
 /// Initial agent state containing system configuration
-pub struct InitState<'c, 's, S> {
+pub struct InitState<'c, 's, S, R> {
 	config: &'c UserConfig,
 	system: Option<String>,
 	tools: Vec<Tool<'s, S>>,
 	mcps: Vec<(McpClient, Vec<String>)>,
 	status: Option<Tool<'s, S>>,
+	responder: Option<R>,
+	tries: usize,
 }
 
-impl<'c, 's, S> InitState<'c, 's, S> {
+impl<'c, 's, S, R> InitState<'c, 's, S, R>
+where
+	R: FnMut(Option<String>, Vec<Segment>, &[Message]) -> Result<String, Option<String>>,
+{
 	/// Add a first user message with text and turn the builder into a *SendState*.
 	///
 	/// This moves the system prompt into the messages array and returns
 	/// a new struct that is ready for extra messages and token callbacks.
-	pub fn user(self, user: String) -> SendState<'c, 's, S> {
+	pub fn user(self, user: String) -> SendState<'c, 's, S, R> {
 		let messages = self
 			.system
 			.into_iter()
@@ -214,6 +221,8 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 			messages,
 			tools: self.tools,
 			status: self.status,
+			responder: self.responder,
+			tries: self.tries,
 		}
 	}
 
@@ -221,7 +230,7 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 	///
 	/// This moves the system prompt into the messages array and returns
 	/// a new struct that is ready for extra messages and token callbacks.
-	pub fn image(self, url: String) -> SendState<'c, 's, S> {
+	pub fn image(self, url: String) -> SendState<'c, 's, S, R> {
 		let messages = self
 			.system
 			.into_iter()
@@ -233,6 +242,8 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 			messages,
 			tools: self.tools,
 			status: self.status,
+			responder: self.responder,
+			tries: self.tries,
 		}
 	}
 
@@ -240,7 +251,7 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 	///
 	/// This moves the system prompt into the messages array and returns
 	/// a new struct that is ready for extra messages and token callbacks.
-	pub fn history(self, messages: impl IntoIterator<Item = Message>) -> SendState<'c, 's, S> {
+	pub fn history(self, messages: impl IntoIterator<Item = Message>) -> SendState<'c, 's, S, R> {
 		let messages = self
 			.system
 			.into_iter()
@@ -252,6 +263,8 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 			messages,
 			tools: self.tools,
 			status: self.status,
+			responder: self.responder,
+			tries: self.tries,
 		}
 	}
 
@@ -270,6 +283,18 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 		self
 	}
 
+	/// Registers a responder function
+	pub fn responder(mut self, responder: R) -> Self {
+		self.responder = Some(responder);
+		self
+	}
+
+	/// Sets number of tries
+	pub fn tries(mut self, tries: usize) -> Self {
+		self.tries = tries;
+		self
+	}
+
 	/// Registers an MCP server
 	pub fn mcp(mut self, mcp: McpClient, tools: &[String]) -> Self {
 		self.mcps.push((mcp, tools.into()));
@@ -282,14 +307,19 @@ impl<'c, 's, S> InitState<'c, 's, S> {
 /// Holds the conversation history and the tool set.  It can emit a callback
 /// for every streaming token, execute the tools found in the assistant reply,
 /// run the status tool, and return a `ReceivedState` that can be continued.
-pub struct SendState<'c, 's, S> {
+pub struct SendState<'c, 's, S, R> {
 	config: &'c UserConfig,
 	messages: Vec<Message>,
 	tools: Vec<Tool<'s, S>>,
 	status: Option<Tool<'s, S>>,
+	responder: Option<R>,
+	tries: usize,
 }
 
-impl<'c, 's, S> SendState<'c, 's, S> {
+impl<'c, 's, S, R> SendState<'c, 's, S, R>
+where
+	R: FnMut(Option<String>, Vec<Segment>, &[Message]) -> Result<String, Option<String>>,
+{
 	/// Add text to the last user message.
 	pub fn user(&mut self, text: String) {
 		if let Some(Message::User(user)) = self.messages.last_mut() {
@@ -317,7 +347,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	pub fn on_token<F: FnMut(&mut S, String, bool) -> String>(
 		self,
 		on_token: F,
-	) -> SendAndHandleTokenState<'c, 's, S, F> {
+	) -> SendAndHandleTokenState<'c, 's, S, R, F> {
 		SendAndHandleTokenState {
 			send_state: self,
 			on_token,
@@ -330,7 +360,7 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 	/// executes any tool calls and the status tool, and returns a
 	/// structure that contains the assistant reply as `text` – ready
 	/// for printing or sending back to the LLM.
-	pub async fn process(self, state: &mut S) -> io::Result<ReceivedState<'c, 's, S>> {
+	pub async fn process(self, state: &mut S) -> io::Result<String> {
 		self.process_inner(state, None::<fn(&mut S, String, bool) -> String>)
 			.await
 	}
@@ -339,44 +369,58 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 		mut self,
 		state: &mut S,
 		mut on_token: Option<impl FnMut(&mut S, String, bool) -> String>,
-	) -> io::Result<ReceivedState<'c, 's, S>> {
-		self.push_initial_status(state);
+	) -> io::Result<String> {
+		for _ in 0..self.tries {
+			self.push_initial_status(state);
 
-		debug!("Messages: {:#?}", self.messages);
+			debug!("Messages: {:#?}", self.messages);
 
-		let completion = self
-			.completion(
-				on_token
-					.as_mut()
-					.map(|handler| |token, is_reasoning| handler(state, token, is_reasoning)),
-			)
-			.await?;
-		let (assistant, segments) = self.parse_response(completion);
-		if let Some(assistant) = &assistant {
-			self.messages.push(Message::Assistant(assistant.clone()));
+			let completion = self
+				.completion(
+					on_token
+						.as_mut()
+						.map(|handler| |token, is_reasoning| handler(state, token, is_reasoning)),
+				)
+				.await?;
+			let (assistant, segments) = self.parse_response(completion);
+			if let Some(assistant) = &assistant {
+				self.messages.push(Message::Assistant(assistant.clone()));
+			}
+
+			let old_len = self.messages.len();
+			let empty = vec![];
+			let tool_calls = segments.iter().flat_map(|seg| match seg {
+				Segment::ToolCall(tc) => tc.iter(),
+				_ => empty.iter(),
+			});
+			let called = self.execute_tools(state, tool_calls);
+			if called {
+				self.push_status(state);
+			}
+			let nbtc = self.messages.len() - old_len;
+
+			if let Some(responder) = self.responder.as_mut() {
+				let user = responder(
+					assistant,
+					segments,
+					&self.messages[self.messages.len() - nbtc..],
+				);
+				let user = match user {
+					Ok(ret) => return Ok(ret),
+					Err(user) => user,
+				};
+				self.messages.extend(
+					user.into_iter()
+						.map(|msg| Message::User(vec![Part::Text(msg)])),
+				);
+			}
+
+			self.messages = prune(self.messages, self.config.char_limit);
 		}
-
-		let old_len = self.messages.len();
-		let empty = vec![];
-		let tool_calls = segments.iter().flat_map(|seg| match seg {
-			Segment::ToolCall(tc) => tc.iter(),
-			_ => empty.iter(),
-		});
-		let called = self.execute_tools(state, tool_calls);
-		if called {
-			self.push_status(state);
-		}
-		let nbtc = self.messages.len() - old_len;
-
-		Ok(ReceivedState {
-			config: self.config,
-			messages: self.messages,
-			tools: self.tools,
-			nbtc,
-			status: self.status,
-			text: assistant,
-			segments,
-		})
+		Err(io::Error::new(
+			io::ErrorKind::QuotaExceeded,
+			"Exceeded number of tries",
+		))
 	}
 
 	async fn completion(
@@ -533,12 +577,16 @@ impl<'c, 's, S> SendState<'c, 's, S> {
 }
 
 /// Wrapper around a `SendState` + a token callback.
-pub struct SendAndHandleTokenState<'c, 's, S, F: FnMut(&mut S, String, bool) -> String> {
-	send_state: SendState<'c, 's, S>,
+pub struct SendAndHandleTokenState<'c, 's, S, R, F: FnMut(&mut S, String, bool) -> String> {
+	send_state: SendState<'c, 's, S, R>,
 	on_token: F,
 }
 
-impl<'c, 's, S, F: FnMut(&mut S, String, bool) -> String> SendAndHandleTokenState<'c, 's, S, F> {
+impl<'c, 's, S, R, F: FnMut(&mut S, String, bool) -> String>
+	SendAndHandleTokenState<'c, 's, S, R, F>
+where
+	R: FnMut(Option<String>, Vec<Segment>, &[Message]) -> Result<String, Option<String>>,
+{
 	/// Adds additional messages to the history
 	pub fn messages(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
 		self.send_state.messages.extend(messages);
@@ -546,47 +594,10 @@ impl<'c, 's, S, F: FnMut(&mut S, String, bool) -> String> SendAndHandleTokenStat
 	}
 
 	/// Starts processing with token callback
-	pub async fn process(self, state: &mut S) -> io::Result<ReceivedState<'c, 's, S>> {
+	pub async fn process(self, state: &mut S) -> io::Result<String> {
 		self.send_state
 			.process_inner(state, Some(self.on_token))
 			.await
-	}
-}
-
-/// Result of processing a user request.
-///
-/// Contains the raw text (without the reasoning wrapper) and the updated history.
-pub struct ReceivedState<'c, 's, S> {
-	config: &'c UserConfig,
-	messages: Vec<Message>,
-	tools: Vec<Tool<'s, S>>,
-	nbtc: usize,
-	status: Option<Tool<'s, S>>,
-	/// Assistant response with reasoning block removed
-	pub text: Option<String>,
-	/// Parsed segments of assistant response
-	pub segments: Vec<Segment>,
-}
-
-impl<'c, 's, T> ReceivedState<'c, 's, T> {
-	/// Continues conversation with new user input
-	pub fn user(mut self, user: Option<String>) -> SendState<'c, 's, T> {
-		self.messages.extend(
-			user.into_iter()
-				.map(|msg| Message::User(vec![Part::Text(msg)])),
-		);
-		self.messages = prune(self.messages, self.config.char_limit);
-		SendState {
-			config: self.config,
-			messages: self.messages,
-			tools: self.tools,
-			status: self.status,
-		}
-	}
-
-	/// Return a slice of tool‑call messages that were invoked during the latest iteration.
-	pub fn tool_calls(&self) -> &[Message] {
-		&self.messages[self.messages.len() - self.nbtc..]
 	}
 }
 
