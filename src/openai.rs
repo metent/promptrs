@@ -54,6 +54,40 @@ impl<'s, S> Request<'s, S> {
 		);
 		tls.write_all(&request_bytes).await?;
 
+		let mut status_code: u16 = 200;
+
+		loop {
+			let line = tls.read_line().await?;
+			let line = match line {
+				Some(l) => l,
+				None => {
+					return Err(io::Error::new(
+						io::ErrorKind::UnexpectedEof,
+						"connection closed while reading headers",
+					));
+				}
+			};
+
+			if line.trim().is_empty() {
+				break;
+			}
+
+			if line.starts_with("HTTP/") {
+				if let Some(code_str) = line.split_whitespace().nth(1) {
+					status_code = code_str.parse::<u16>().map_err(|_| {
+						io::Error::other(format!("invalid status code {}", code_str))
+					})?;
+				}
+			}
+		}
+
+		if status_code >= 400 {
+			return Err(io::Error::new(
+				io::ErrorKind::Other,
+				format!("HTTP error: {} (status >= 400)", status_code),
+			));
+		}
+
 		while let Some(line) = tls.read_line().await? {
 			let trimmed = line.trim();
 
