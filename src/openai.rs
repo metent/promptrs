@@ -312,7 +312,7 @@ impl<S> Serialize for Tool<'_, S> {
 }
 
 /// Represents a chat message in conversation history.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub enum Message {
 	/// Instructions for assistant behavior
 	System(String),
@@ -326,7 +326,7 @@ pub enum Message {
 	Status((Function, String)),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 /// Represents part of a message
 pub enum Part {
 	/// Text Content
@@ -410,7 +410,7 @@ struct RawFunction {
 }
 
 /// Represents a function call to an external tool.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Function {
 	/// Name of the tool function to invoke
 	pub name: String,

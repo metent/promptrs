@@ -92,7 +92,7 @@ pub use tool_attr_macro::tool;
 ///     .model("gpt-4o".into())
 ///     .build();
 /// ```
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct UserConfig {
 	/// API authentication key (if required by provider)
 	pub api_key: Option<String>,
@@ -613,7 +613,7 @@ pub enum SystemPromptMode {
 }
 
 /// Delimiter configuration for structured message parsing.
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Delims {
 	/// Delimiters for assistant reasoning
 	pub reasoning: (String, String),
