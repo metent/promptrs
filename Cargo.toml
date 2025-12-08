@@ -17,11 +17,12 @@ tool-attr-macro = { path = "tool", version = "0.1.0" }
 log = "0.4.28"
 rustls = { version = "0.23.35", default-features = false, features = ["ring", "std", "tls12"] }
 url = "2.5.7"
-rustls-native-certs = "0.8.2"
 
 [target.'cfg(not(target_os = "wasi"))'.dependencies]
+rustls-native-certs = "0.8.2"
 tokio = { version = "1.48.0", features = ["net", "io-util"] }
 
 [target.'cfg(target_os = "wasi")'.dependencies]
+webpki-roots = "1.0.3"
 wstd = "0.6.3"
 wit-bindgen-rt = { version = "0.44.0", features = ["bitflags"] }
