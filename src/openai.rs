@@ -12,8 +12,11 @@ use url::Url;
 
 /// Represents a chat completion request configuration.
 pub struct Request<'s, S> {
+	/// API key for authentication
 	pub api_key: &'s Option<String>,
+	/// Base URL to which /v1/chat/completions will be concatenated
 	pub base_url: &'s String,
+	/// JSON body
 	pub body: Params<'s, S>,
 }
 
@@ -184,11 +187,17 @@ impl<'s, S> Request<'s, S> {
 
 /// API request parameters
 pub struct Params<'s, S> {
+	/// Model identifier (e.g., "gpt-4", "claude-2")
 	pub model: &'s String,
+	/// Sampling temperature for response randomness (0-2)
 	pub temperature: Option<f64>,
+	/// Nucleus sampling parameter for diversity control (0-1)
 	pub top_p: Option<f64>,
+	/// Inner params
 	pub inner: InnerParams<'s, S>,
+	/// Stream mode flag
 	pub stream: bool,
+	/// Extra params
 	pub extra: &'s serde_json::Map<String, serde_json::Value>,
 }
 
@@ -213,10 +222,15 @@ impl<S> Serialize for Params<'_, S> {
 	}
 }
 
+/// Inner params
 pub struct InnerParams<'s, S> {
+	/// List of messages
 	pub messages: &'s [Message],
+	/// List of tools
 	pub tools: &'s [Tool<'s, S>],
+	/// Status tool
 	pub status: &'s Option<Tool<'s, S>>,
+	/// System prompt mode
 	pub mode: SystemPromptMode,
 }
 
@@ -312,7 +326,7 @@ impl<S> Serialize for Tool<'_, S> {
 }
 
 /// Represents a chat message in conversation history.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Message {
 	/// Instructions for assistant behavior
 	System(String),
@@ -353,19 +367,18 @@ impl Serialize for Part {
 }
 
 /// Response structure containing AI output and tool calls.
-///
-/// # Fields
-/// * `reasoning` - Optional assistant reasoning about response generation
-/// * `content` - Main response content from AI
-/// * `tool_calls` - List of executed tool function calls
+#[derive(Serialize)]
 pub struct Response {
+	/// Optional assistant reasoning about response generation
 	pub reasoning: Option<String>,
+	/// Main response content from AI
 	pub content: String,
+	/// List of executed tool function calls
 	pub tool_calls: Vec<Function>,
 }
 
 /// Response segment
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum Segment {
 	/// Assistant reasoning about response generation
 	Reasoning(String),
@@ -380,6 +393,7 @@ pub enum Segment {
 }
 
 #[derive(Debug, Deserialize)]
+/// Chat Completion Chunk
 pub struct ChatCompletionChunk {
 	choices: Vec<Choice>,
 }
@@ -410,7 +424,7 @@ struct RawFunction {
 }
 
 /// Represents a function call to an external tool.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Function {
 	/// Name of the tool function to invoke
 	pub name: String,

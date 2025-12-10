@@ -61,9 +61,11 @@
 mod https;
 /// mcp
 pub mod mcp;
-mod openai;
-mod parser;
-mod pruner;
+pub mod openai;
+/// parser
+pub mod parser;
+/// pruner
+pub mod pruner;
 
 use log::{debug, warn};
 pub use mcp::McpClient;
@@ -92,7 +94,7 @@ pub use tool_attr_macro::tool;
 ///     .model("gpt-4o".into())
 ///     .build();
 /// ```
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct UserConfig {
 	/// API authentication key (if required by provider)
 	pub api_key: Option<String>,
@@ -588,7 +590,7 @@ where
 	R: FnMut(Option<String>, Vec<Segment>, &[Message]) -> Result<String, Option<String>>,
 {
 	/// Adds additional messages to the history
-	pub fn messages(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
+	pub fn history(mut self, messages: impl IntoIterator<Item = Message>) -> Self {
 		self.send_state.messages.extend(messages);
 		self
 	}
@@ -613,7 +615,7 @@ pub enum SystemPromptMode {
 }
 
 /// Delimiter configuration for structured message parsing.
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Delims {
 	/// Delimiters for assistant reasoning
 	pub reasoning: (String, String),
