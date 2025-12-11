@@ -69,7 +69,7 @@ pub mod pruner;
 
 use log::{debug, warn};
 pub use mcp::McpClient;
-pub use openai::{Arguments, Function, Message, Part, Segment};
+pub use openai::{Arguments, Function, ImageUrl, Message, Part, Segment};
 use openai::{InnerParams, Params, Request, Response};
 use parser::parse;
 use pruner::prune;
@@ -216,7 +216,7 @@ where
 			.system
 			.into_iter()
 			.map(Message::System)
-			.chain([Message::User(vec![Part::Text(user)])])
+			.chain([Message::User(vec![Part::Text { text: user }])])
 			.collect();
 		SendState {
 			config: self.config,
@@ -237,7 +237,9 @@ where
 			.system
 			.into_iter()
 			.map(Message::System)
-			.chain([Message::User(vec![Part::Image(url)])])
+			.chain([Message::User(vec![Part::Image {
+				image_url: ImageUrl { url },
+			}])])
 			.collect();
 		SendState {
 			config: self.config,
@@ -325,14 +327,16 @@ where
 	/// Add text to the last user message.
 	pub fn user(&mut self, text: String) {
 		if let Some(Message::User(user)) = self.messages.last_mut() {
-			user.push(Part::Text(text));
+			user.push(Part::Text { text: text });
 		}
 	}
 
 	/// Add an image to the last user message.
 	pub fn image(&mut self, url: String) {
 		if let Some(Message::User(user)) = self.messages.last_mut() {
-			user.push(Part::Image(url));
+			user.push(Part::Image {
+				image_url: ImageUrl { url },
+			});
 		}
 	}
 
@@ -413,7 +417,7 @@ where
 				};
 				self.messages.extend(
 					user.into_iter()
-						.map(|msg| Message::User(vec![Part::Text(msg)])),
+						.map(|msg| Message::User(vec![Part::Text { text: msg }])),
 				);
 			}
 

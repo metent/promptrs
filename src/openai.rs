@@ -249,7 +249,9 @@ impl<S> Serialize for InnerParams<'_, S> {
 		}
 
 		if let (Some(Message::System(system)), SystemPromptMode::User) = (curr, mode) {
-			let mut content = vec![Part::Text(system.clone())];
+			let mut content = vec![Part::Text {
+				text: system.clone(),
+			}];
 			if let Some(Message::User(user)) = curr {
 				content.extend(user.iter().cloned());
 			}
@@ -340,30 +342,29 @@ pub enum Message {
 	Status((Function, String)),
 }
 
-#[derive(Clone, Debug, Deserialize)]
-/// Represents part of a message
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type")]
+/// Part of a message
 pub enum Part {
-	/// Text Content
-	Text(String),
-	/// Image Url
-	Image(String),
+	/// Text Part
+	#[serde(rename = "text")]
+	Text {
+		/// Text Field
+		text: String,
+	},
+	/// Image Part
+	#[serde(rename = "image_url")]
+	Image {
+		/// Image URL Field
+		image_url: ImageUrl,
+	},
 }
 
-impl Serialize for Part {
-	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		let mut map = serializer.serialize_map(Some(2))?;
-		match self {
-			Part::Text(text) => {
-				map.serialize_entry("type", "text")?;
-				map.serialize_entry("text", text)?;
-			}
-			Part::Image(url) => {
-				map.serialize_entry("type", "image_url")?;
-				map.serialize_entry("image_url", &HashMap::from([("url", url)]))?;
-			}
-		}
-		map.end()
-	}
+/// Image URl
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ImageUrl {
+	/// URL field
+	pub url: String,
 }
 
 /// Response structure containing AI output and tool calls.
