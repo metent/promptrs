@@ -13,16 +13,16 @@ categories = ["text-processing", "parsing", "development-tools"]
 either = "1.15.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["raw_value"] }
-winnow = "0.7.13"
+winnow = "0.7.14"
 tool-attr-macro = { path = "tool", version = "0.1.0" }
-log = "0.4.28"
+log = "0.4.29"
 futures-util = { version = "0.3.31", features = ["io"] }
 
 [target.'cfg(not(target_os = "wasi"))'.dependencies]
 reqwest = { version = "0.12.23", default-features = false, features = ["charset", "json", "rustls-tls", "stream"] }
 
 [target.'cfg(target_os = "wasi")'.dependencies]
-futures-lite = "2.6.1"
+futures-lite = "1.12.0"
 wstd = "0.6.3"
-http = "1.3.1"
+http = "1.4.0"
 wit-bindgen-rt = { version = "0.44.0", features = ["bitflags"] }
