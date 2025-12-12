@@ -1,14 +1,34 @@
 //! Core client implementation for chat completions.
 use super::{SystemPromptMode, Tool};
-use crate::https::{TlsStream, build_http_request};
+use either::IntoEither;
+#[cfg(not(target_os = "wasi"))]
+use futures_util::{AsyncBufReadExt, Stream, StreamExt, TryStreamExt};
 use log::info;
+#[cfg(not(target_os = "wasi"))]
+use reqwest::Client;
+#[cfg(not(target_os = "wasi"))]
+use reqwest::header::CONTENT_TYPE;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::io;
-use url::Url;
+#[cfg(not(target_os = "wasi"))]
+use std::time::Duration;
+
+#[cfg(target_os = "wasi")]
+use futures_lite::StreamExt;
+#[cfg(target_os = "wasi")]
+use http::header::{AUTHORIZATION, CONTENT_TYPE};
+#[cfg(target_os = "wasi")]
+use wstd::http::body::Bytes;
+#[cfg(target_os = "wasi")]
+use wstd::http::body::util::BodyDataStream;
+#[cfg(target_os = "wasi")]
+use wstd::http::body::util::combinators::UnsyncBoxBody;
+#[cfg(target_os = "wasi")]
+use wstd::http::{Body, BodyExt, Client, Request as Req};
 
 /// Represents a chat completion request configuration.
 pub struct Request<'s, S> {
@@ -31,85 +51,17 @@ impl<'s, S> Request<'s, S> {
 		let mut tool_calls = Vec::new();
 		let mut content = String::new();
 		let mut reasoning = String::new();
-
-		let url = Url::parse(self.base_url)
-			.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
-		let host = url
-			.host_str()
-			.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing host"))?;
-		let port = url.port_or_known_default().ok_or_else(|| {
-			io::Error::new(
-				io::ErrorKind::InvalidInput,
-				"could not determine port from URL",
-			)
-		})?;
-
-		let mut tls = TlsStream::connect(host, port).await?;
-
-		let body_bytes = serde_json::to_vec(&self.body)?;
-		let request_bytes = build_http_request(
-			"POST",
-			host,
-			"/v1/chat/completions",
-			&body_bytes,
-			&[],
-			self.api_key.as_ref().map(|k| k.as_str()),
-		);
-		tls.write_all(&request_bytes).await?;
-
-		let mut status_code: u16 = 200;
-
-		loop {
-			let line = tls.read_line().await?;
-			let line = match line {
-				Some(l) => l,
-				None => {
-					return Err(io::Error::new(
-						io::ErrorKind::UnexpectedEof,
-						"connection closed while reading headers",
-					));
-				}
-			};
-
-			if line.trim().is_empty() {
-				break;
-			}
-
-			if line.starts_with("HTTP/") {
-				if let Some(code_str) = line.split_whitespace().nth(1) {
-					status_code = code_str.parse::<u16>().map_err(|_| {
-						io::Error::other(format!("invalid status code {}", code_str))
-					})?;
-				}
-			}
-		}
-
-		if status_code >= 400 {
-			return Err(io::Error::new(
-				io::ErrorKind::Other,
-				format!("HTTP error: {} (status >= 400)", status_code),
-			));
-		}
-
-		while let Some(line) = tls.read_line().await? {
-			let trimmed = line.trim();
-
-			if trimmed.is_empty() {
-				continue;
-			}
-
-			let Some(raw) = trimmed.strip_prefix("data:") else {
+		#[cfg(not(target_os = "wasi"))]
+		let mut stream = Box::pin(self.stream().await?);
+		#[cfg(target_os = "wasi")]
+		let body = self.body().await?;
+		#[cfg(target_os = "wasi")]
+		let mut stream = Box::pin(self.stream(body));
+		while let Some(chunk) = stream.next().await {
+			let Ok(chunk) = chunk else {
 				continue;
 			};
-			let raw = raw.trim();
 
-			if raw == "[DONE]" || raw.is_empty() {
-				break;
-			}
-
-			let json_obj = serde_json::from_str::<ChatCompletionChunk>(raw).map_err(|e| {
-				io::Error::new(io::ErrorKind::InvalidData, format!("JSON parse: {e}"))
-			})?;
 			let Some(Choice {
 				index,
 				delta:
@@ -118,7 +70,7 @@ impl<'s, S> Request<'s, S> {
 						reasoning_content,
 						tool_calls: tcs,
 					},
-			}) = json_obj.choices.into_iter().next()
+			}) = chunk.choices.into_iter().next()
 			else {
 				continue;
 			};
@@ -182,6 +134,88 @@ impl<'s, S> Request<'s, S> {
 				})
 				.collect(),
 		})
+	}
+
+	#[cfg(not(target_os = "wasi"))]
+	async fn stream(&self) -> io::Result<impl Stream<Item = io::Result<ChatCompletionChunk>>> {
+		let response = Client::new()
+			.post(self.base_url.to_string() + "/v1/chat/completions")
+			.into_either(self.api_key.is_some())
+			.right_or_else(|req| req.bearer_auth(self.api_key.as_ref().as_slice()[0]))
+			.header(CONTENT_TYPE, "application/json")
+			.json(&self.body)
+			.timeout(Duration::MAX)
+			.send()
+			.await
+			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+		let status = response.status();
+		if !status.is_success() {
+			let resp = response
+				.text()
+				.await
+				.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+			return Err(io::Error::from(io::Error::new(
+				io::ErrorKind::ConnectionRefused,
+				format!("Status Code: {}\nResponse: {resp}", status),
+			)));
+		}
+		let stream = response
+			.bytes_stream()
+			.map(|x| x.map_err(|err| io::Error::new(io::ErrorKind::Other, err)))
+			.into_async_read()
+			.lines()
+			.filter_map(async |l| {
+				let s = l.ok()?;
+				(!s.contains("[DONE]")).then_some(())?;
+				let i = s.find('{')?;
+				Some(serde_json::from_str(&s[i..]).map_err(|err| {
+					io::Error::new(io::ErrorKind::InvalidData, format!("Malformed JSON: {err}"))
+				}))
+			});
+
+		Ok(stream)
+	}
+
+	#[cfg(target_os = "wasi")]
+	async fn body(&self) -> io::Result<Body> {
+		let client = Client::new();
+		let response = Req::post(self.base_url.to_string() + "/v1/chat/completions")
+			.into_either(self.api_key.is_some())
+			.right_or_else(|req| {
+				req.header(
+					AUTHORIZATION,
+					format!("Bearer {}", self.api_key.as_ref().as_slice()[0]),
+				)
+			})
+			.header(CONTENT_TYPE, "application/json")
+			.body(Body::from_json(&self.body)?)
+			.map(|req| client.send(req))
+			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?
+			.await
+			.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+		let status = response.status();
+		if !status.is_success() {
+			let mut body = response.into_body();
+			let resp = body
+				.contents()
+				.await
+				.map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+			return Err(io::Error::from(io::Error::new(
+				io::ErrorKind::ConnectionRefused,
+				format!(
+					"Status Code: {}\nResponse: {}",
+					std::str::from_utf8(&resp).unwrap_or(""),
+					status
+				),
+			)));
+		}
+
+		Ok(response.into_body())
+	}
+
+	#[cfg(target_os = "wasi")]
+	fn stream(&self, body: Body) -> ChatCompletionStream {
+		ChatCompletionStream::new(body.into_boxed_body().into_data_stream())
 	}
 }
 
@@ -435,3 +469,72 @@ pub struct Function {
 
 /// Tool call arguments
 pub type Arguments = serde_json::Map<String, serde_json::Value>;
+
+#[cfg(target_os = "wasi")]
+struct ChatCompletionStream {
+	buf: Vec<u8>,
+	inner: BodyDataStream<UnsyncBoxBody<Bytes, wstd::http::Error>>,
+}
+
+#[cfg(target_os = "wasi")]
+impl ChatCompletionStream {
+	fn new(inner: BodyDataStream<UnsyncBoxBody<Bytes, wstd::http::Error>>) -> Self {
+		ChatCompletionStream {
+			buf: Vec::new(),
+			inner,
+		}
+	}
+
+	async fn next(&mut self) -> Option<io::Result<ChatCompletionChunk>> {
+		self.read_chunk().await.transpose()
+	}
+
+	async fn read_chunk(&mut self) -> io::Result<Option<ChatCompletionChunk>> {
+		while let Some(line) = self.read_line().await? {
+			let line = match line.iter().rposition(|&c| c == b'\n' || c == b'\r') {
+				Some(pos) => &line[..pos],
+				None => &line[..],
+			};
+
+			let Ok(s) = std::str::from_utf8(line) else {
+				continue;
+			};
+			if s.starts_with("[DONE]") {
+				return Ok(None);
+			}
+			let Some(json_start) = s.find('{') else {
+				continue;
+			};
+
+			let chunk_res = serde_json::from_str(&s[json_start..]).map_err(|e| {
+				io::Error::new(io::ErrorKind::InvalidData, format!("Malformed JSON: {}", e))
+			});
+
+			return Some(chunk_res).transpose();
+		}
+		Ok(None)
+	}
+
+	pub async fn read_line(&mut self) -> io::Result<Option<Vec<u8>>> {
+		loop {
+			if let Some(nl) = self.buf.iter().position(|&c| c == b'\n') {
+				let line = self.buf.drain(..nl + 1).collect::<Vec<_>>();
+				return Ok(Some(line));
+			}
+
+			match self.inner.next().await {
+				Some(Ok(bytes)) => {
+					self.buf.extend_from_slice(&bytes);
+				}
+				Some(Err(e)) => return Err(io::Error::other(e)),
+				None => {
+					if self.buf.is_empty() {
+						return Ok(None);
+					}
+					let line = self.buf.drain(..).collect::<Vec<_>>();
+					return Ok(Some(line));
+				}
+			}
+		}
+	}
+}
