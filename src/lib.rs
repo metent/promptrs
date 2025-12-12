@@ -58,9 +58,6 @@
 //! }
 //! ```
 
-mod https;
-/// mcp
-pub mod mcp;
 pub mod openai;
 /// parser
 pub mod parser;
@@ -68,7 +65,6 @@ pub mod parser;
 pub mod pruner;
 
 use log::{debug, warn};
-pub use mcp::McpClient;
 pub use openai::{Arguments, Function, ImageUrl, Message, Part, Segment};
 use openai::{InnerParams, Params, Request, Response};
 use parser::parse;
@@ -136,7 +132,6 @@ impl UserConfig {
 			config: self,
 			system,
 			tools: Vec::new(),
-			mcps: Vec::new(),
 			status: None,
 			responder: None,
 			tries: 1,
@@ -197,7 +192,6 @@ pub struct InitState<'c, 's, S, R> {
 	config: &'c UserConfig,
 	system: Option<String>,
 	tools: Vec<Tool<'s, S>>,
-	mcps: Vec<(McpClient, Vec<String>)>,
 	status: Option<Tool<'s, S>>,
 	responder: Option<R>,
 	tries: usize,
@@ -296,12 +290,6 @@ where
 	/// Sets number of tries
 	pub fn tries(mut self, tries: usize) -> Self {
 		self.tries = tries;
-		self
-	}
-
-	/// Registers an MCP server
-	pub fn mcp(mut self, mcp: McpClient, tools: &[String]) -> Self {
-		self.mcps.push((mcp, tools.into()));
 		self
 	}
 }
